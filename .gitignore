@@ -1,0 +1,85 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ / Android Studio
+*.iml
+*.ipr
+*.iws
+.idea/
+local.properties
+
+# VS Code
+#.vscode/
+.vscode/*.code-snippets
+
+# Flutter / Dart / Pub
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Generated files
+generated/
+*.g.dart
+*.freezed.dart
+
+# Firebase / Crashlytics
+firebase-debug.log
+firebase-debug.*.log
+crashlytics-build.properties
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio build folders
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Keystore files
+*.jks
+*.keystore
+key.properties
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# MacOS
+macos/Flutter/ephemeral/
+
+# Windows
+windows/flutter/ephemeral/
+
+# Linux
+linux/flutter/ephemeral/
+
+# Web
+web/flutter_service_worker.js
+web/.dart_tool/
+
+# FVM
+.fvm/
+fvm_settings.json
