@@ -1,0 +1,20 @@
+import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:field_guard_re/core/network/dio_client.dart';
+import 'package:field_guard_re/features/auth/data/repositories/auth_repository_impl.dart';
+import 'package:field_guard_re/features/auth/domain/repositories/auth_repository.dart';
+import 'auth_notifier.dart';
+import 'auth_state.dart';
+
+export 'auth_state.dart';
+export 'auth_notifier.dart';
+
+final dioProvider = Provider<Dio>((ref) => DioClient.createDio());
+
+final authRepositoryProvider = Provider<AuthRepository>(
+  (ref) => AuthRepositoryImpl(ref.watch(dioProvider)),
+);
+
+final authNotifierProvider = StateNotifierProvider<AuthNotifier, AuthState>(
+  (ref) => AuthNotifier(ref.watch(authRepositoryProvider)),
+);
