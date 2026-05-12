@@ -26,7 +26,14 @@ class LoginResponse {
   }
 
   static AuthUser _userFromJson(Object? json) {
-    if (json is Map<String, dynamic>) return AuthUser.fromJson(json);
-    return const AuthUser(id: '', name: '', phone: '');
+    if (json is! Map<String, dynamic>) {
+      return const AuthUser(id: '', name: '', phone: '');
+    }
+    return AuthUser(
+      id: json['id']?.toString() ?? '',
+      name: (json['name'] ?? json['fullName'] ?? '') as String,
+      phone: (json['phone'] ?? '') as String,
+      role: json['role'] as String?,
+    );
   }
 }

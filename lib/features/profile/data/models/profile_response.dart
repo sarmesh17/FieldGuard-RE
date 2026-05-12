@@ -2,9 +2,9 @@ import 'package:json_annotation/json_annotation.dart';
 
 part 'profile_response.g.dart';
 
-@JsonSerializable()
+@JsonSerializable(createToJson: false)
 class ProfileResponse {
-  final String id;
+  final int id;
 
   @JsonKey(name: 'full_name')
   final String fullName;
@@ -17,11 +17,11 @@ class ProfileResponse {
   @JsonKey(name: 'employee_code')
   final String employeeCode;
   @JsonKey(name: 'manager_id')
-  final String managerId;
+  final int? managerId;
   @JsonKey(name: 'is_active')
   final bool isActive;
   @JsonKey(name: 'profile_image')
-  final String profileImage;
+  final String? profileImage;
   @JsonKey(name: 'created_at')
   final DateTime createdAt;
 

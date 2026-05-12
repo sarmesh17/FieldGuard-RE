@@ -3,7 +3,6 @@ import 'package:field_guard_re/core/theme/app_colors.dart';
 import 'package:field_guard_re/core/theme/app_responsive.dart';
 import 'package:field_guard_re/core/theme/app_text_styles.dart';
 import 'components/visit_card.dart';
-import '../profile_screen/components/bottom_nav_bar.dart';
 
 class VisitHistoryScreen extends StatefulWidget {
   const VisitHistoryScreen({super.key});
@@ -186,7 +185,6 @@ class _VisitHistoryScreenState extends State<VisitHistoryScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: const BottomNavBar(selectedIndex: 2),
     );
   }
 }

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_responsive.dart';
 import 'components/map_marker.dart';
 import 'components/schedule_list.dart';
-import '../profile_screen/components/bottom_nav_bar.dart';
 
 class RouteScreen extends StatelessWidget {
   const RouteScreen({super.key});
@@ -271,7 +270,6 @@ class RouteScreen extends StatelessWidget {
           ],
         ),
       ),
-      bottomNavigationBar: const BottomNavBar(selectedIndex: 1),
     );
   }
 }

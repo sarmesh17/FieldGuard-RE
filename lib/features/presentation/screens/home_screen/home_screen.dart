@@ -4,7 +4,6 @@ import 'components/active_visit_card.dart';
 import 'components/route_card.dart';
 import 'components/stat_card.dart';
 import '../../shared/components/quick_action_card.dart';
-import '../profile_screen/components/bottom_nav_bar.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -224,7 +223,6 @@ class HomeScreen extends StatelessWidget {
           ],
         ),
       ),
-      bottomNavigationBar: const BottomNavBar(selectedIndex: 0),
     );
   }
 }
