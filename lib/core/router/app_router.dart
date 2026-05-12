@@ -13,12 +13,17 @@ import '../../features/presentation/screens/sms_sent_screen/sms_sent_screen.dart
 import '../../features/presentation/screens/daily_summary_screen/daily_summary_screen.dart';
 import '../../features/presentation/screens/visit_history_screen/visit_history_screen.dart';
 import '../../features/presentation/screens/notifications_screen/notifications_screen.dart';
-import '../../features/presentation/screens/profile_screen/profile_screen.dart';
+import '../../features/profile/presentation/screens/profile_screen/profile_screen.dart';
+import '../../features/profile/presentation/screens/personal_details_screen/personal_details_screen.dart';
+import '../widgets/main_shell.dart';
 import 'app_routes.dart';
 
 /// App Router Configuration using GoRouter
 class AppRouter {
+  static final navigatorKey = GlobalKey<NavigatorState>();
+
   static final GoRouter router = GoRouter(
+    navigatorKey: navigatorKey,
     initialLocation: AppRoutes.splash,
     debugLogDiagnostics: true,
     routes: [
@@ -40,16 +45,27 @@ class AppRouter {
         builder: (context, state) => const LoginScreen(),
       ),
 
-      // Home Screen
-      GoRoute(
-        path: AppRoutes.home,
-        builder: (context, state) => const HomeScreen(),
-      ),
-
-      // Route Screen
-      GoRoute(
-        path: AppRoutes.route,
-        builder: (context, state) => const RouteScreen(),
+      // Tab screens wrapped in a shell that provides the global bottom nav bar
+      ShellRoute(
+        builder: (context, state, child) => MainShell(child: child),
+        routes: [
+          GoRoute(
+            path: AppRoutes.home,
+            builder: (context, state) => const HomeScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.route,
+            builder: (context, state) => const RouteScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.visitHistory,
+            builder: (context, state) => const VisitHistoryScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.profile,
+            builder: (context, state) => const ProfileScreen(),
+          ),
+        ],
       ),
 
       // Shop Details Screen
@@ -97,23 +113,18 @@ class AppRouter {
         builder: (context, state) => const DailySummaryScreen(),
       ),
 
-      // Visit History Screen
-      GoRoute(
-        path: AppRoutes.visitHistory,
-        builder: (context, state) => const VisitHistoryScreen(),
-      ),
-
       // Notifications Screen
       GoRoute(
         path: AppRoutes.notifications,
         builder: (context, state) => const NotificationsScreen(),
       ),
 
-      // Profile Screen
+      // Personal Details Screen
       GoRoute(
-        path: AppRoutes.profile,
-        builder: (context, state) => const ProfileScreen(),
+        path: AppRoutes.personalDetails,
+        builder: (context, state) => const PersonalDetailsScreen(),
       ),
+
     ],
     errorBuilder: (context, state) => Scaffold(
       body: Center(

@@ -83,3 +83,5 @@ web/.dart_tool/
 # FVM
 .fvm/
 fvm_settings.json
+
+.claude/

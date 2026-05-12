@@ -53,4 +53,7 @@ class AppRoutes {
 
   /// User profile screen
   static const String profile = '/profile';
+
+  /// Personal details edit screen
+  static const String personalDetails = '/personal-details';
 }
