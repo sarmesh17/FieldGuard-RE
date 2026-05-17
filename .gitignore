@@ -20,7 +20,7 @@ migrate_working_dir/
 local.properties
 
 # VS Code
-#.vscode/
+.vscode/
 .vscode/*.code-snippets
 
 # Flutter / Dart / Pub
@@ -85,3 +85,6 @@ web/.dart_tool/
 fvm_settings.json
 
 .claude/
+
+# Environment secrets
+.env

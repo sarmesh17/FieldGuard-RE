@@ -6,10 +6,6 @@ class AppConstants {
   static const String appName = 'Field Guard';
   static const String appVersion = 'V1.0';
 
-  // API Configuration (placeholder)
-  static const String baseUrl = 'https://api.fieldguard.com';
-  static const Duration apiTimeout = Duration(seconds: 30);
-
   // Validation
   static const int minPasswordLength = 8;
   static const int phoneNumberLength = 10; // Nepal mobile: 9XXXXXXXXX

@@ -5,6 +5,7 @@ class ApiConstant {
   // The endpoint for user login
   static const String loginEndpoint = "$baseUrl/api/v1/auth/login";
   static const String profileEndpoint = "$baseUrl/api/v1/employees/profile";
+  static const String shopsEndpoint = "$baseUrl/api/v1/shops";
 
   // The endpoint for refreshing tokens
   static const String refreshTokenEndpoint =
