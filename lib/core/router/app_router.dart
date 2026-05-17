@@ -15,6 +15,8 @@ import '../../features/presentation/screens/visit_history_screen/visit_history_s
 import '../../features/presentation/screens/notifications_screen/notifications_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen/profile_screen.dart';
 import '../../features/profile/presentation/screens/personal_details_screen/personal_details_screen.dart';
+import '../../features/presentation/screens/route_screen/map_fullscreen_screen.dart';
+import '../../features/shops/presentation/screens/shops_list_screen.dart';
 import '../widgets/main_shell.dart';
 import 'app_routes.dart';
 
@@ -123,6 +125,24 @@ class AppRouter {
       GoRoute(
         path: AppRoutes.personalDetails,
         builder: (context, state) => const PersonalDetailsScreen(),
+      ),
+
+      // Map Fullscreen Screen
+      GoRoute(
+        path: AppRoutes.mapFullscreen,
+        builder: (context, state) {
+          final extra = state.extra as Map<String, double?>?;
+          return MapFullscreenScreen(
+            initialLat: extra?['lat'],
+            initialLng: extra?['lng'],
+          );
+        },
+      ),
+
+      // Shops List Screen
+      GoRoute(
+        path: AppRoutes.showShops,
+        builder: (context, state) => const ShopsListScreen(),
       ),
 
     ],

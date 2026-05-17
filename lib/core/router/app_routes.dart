@@ -56,4 +56,10 @@ class AppRoutes {
 
   /// Personal details edit screen
   static const String personalDetails = '/personal-details';
+
+  /// Full screen map view
+  static const String mapFullscreen = '/map-fullscreen';
+
+  /// Shops list screen
+  static const String showShops = '/show-shops';
 }

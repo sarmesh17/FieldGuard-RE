@@ -402,11 +402,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
             title: 'WORK',
             items: [
               _Item(
-                icon: Icons.map_outlined,
-                label: 'Territory Map',
+                icon: Icons.store_outlined,
+                label: 'Show Shops',
                 iconColor: const Color(0xFF2563EB),
                 iconBg: const Color(0xFFEFF6FF),
-                onTap: () {},
+                onTap: () => context.push(AppRoutes.showShops),
               ),
               _Item(
                 icon: Icons.history,
