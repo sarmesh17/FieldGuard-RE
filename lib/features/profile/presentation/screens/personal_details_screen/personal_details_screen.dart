@@ -163,7 +163,7 @@ class _PersonalDetailsScreenState extends ConsumerState<PersonalDetailsScreen> {
 
     if (profileState is ProfileSuccess && !_initialized) {
       _fullNameController.text = profileState.response.fullName;
-      _emailController.text = profileState.response.email;
+      _emailController.text = profileState.response.email ?? '';
       _initialized = true;
     }
 

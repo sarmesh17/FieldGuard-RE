@@ -12,9 +12,12 @@ class ProfileDataSourceImpl extends ProfileDataSource with ApiRunner {
 
   @override
   Future<Result<ProfileResponse>> getProfile() async => safeCall(() async {
-    final response = await _dio.get(ApiConstant.profileEndpoint);
+    final response = await _dio.get(ApiConstant.authMeEndpoint);
     final body = response.data as Map<String, dynamic>;
-    return ProfileResponse.fromJson(body['employee'] as Map<String, dynamic>);
+    final data = body['user'] as Map<String, dynamic>? ??
+        body['data'] as Map<String, dynamic>? ??
+        body;
+    return ProfileResponse.fromJson(data);
   });
 
   @override

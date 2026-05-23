@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
+import 'package:field_guard_re/core/services/geofence_visit_service.dart';
 import 'package:field_guard_re/core/services/token_storage.dart';
 import 'package:field_guard_re/core/theme/app_colors.dart';
 import 'package:field_guard_re/core/theme/app_responsive.dart';
@@ -486,6 +487,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                 children: [
                   OutlinedButton.icon(
                     onPressed: () async {
+                      // Stop geofence detection/uploads for this session;
+                      // persisted visit + queue resume after re-login.
+                      GeofenceVisitService.instance.stop();
                       await TokenStorage.clearTokens();
                       if (context.mounted) context.go(AppRoutes.login);
                     },

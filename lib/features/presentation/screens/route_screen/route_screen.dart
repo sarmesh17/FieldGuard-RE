@@ -1,42 +1,49 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:go_router/go_router.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../core/router/app_routes.dart';
+import '../../../../core/services/mapbox_directions_service.dart';
 import '../../../../core/theme/app_responsive.dart';
-import 'components/create_geofence_form.dart';
+import '../../../tasks/data/models/task_model.dart';
+import '../../../tasks/presentation/providers/tasks_provider.dart';
+import '../../../tracking/presentation/providers/tracking_provider.dart';
 import 'components/schedule_list.dart';
+import 'components/task_nav_overlay_controller.dart';
 
-const _geofenceRadius = 50.0; // metres
-
-class RouteScreen extends StatefulWidget {
+class RouteScreen extends ConsumerStatefulWidget {
   const RouteScreen({super.key});
 
   @override
-  State<RouteScreen> createState() => _RouteScreenState();
+  ConsumerState<RouteScreen> createState() => _RouteScreenState();
 }
 
-class _RouteScreenState extends State<RouteScreen> {
+class _RouteScreenState extends ConsumerState<RouteScreen> {
   MapboxMap? _mapboxMap;
   bool _isLocating = false;
   geo.Position? _lastPosition; // cached so fullscreen reuses it
 
-  // Geofence state
-  Position? _geofenceCenter;
-  bool _geofenceActive = false;
-  bool _isInsideGeofence = false;
+  // Position stream — feeds the task navigation overlay's re-route trigger.
   StreamSubscription<geo.Position>? _positionStream;
-  PolygonAnnotationManager? _polygonManager;
-  PolygonAnnotation? _geofencePolygon;
+
+  // ── Task navigation overlay ──────────────────────────────────────────────
+  // Owned by `TaskNavOverlayController`; we just hold a reference so the
+  // active task transitions and position updates can be forwarded to it.
+  // Same controller is used by `MapFullscreenScreen` so behaviour stays
+  // identical between the embedded and fullscreen maps.
+  TaskNavOverlayController? _navOverlay;
+  RouteInfo? _activeRoute;
+  bool _activeRouteFetching = false;
 
   @override
   void dispose() {
     _positionStream?.cancel();
+    _navOverlay?.dispose();
     super.dispose();
   }
 
@@ -52,11 +59,48 @@ class _RouteScreenState extends State<RouteScreen> {
     if (!status.isGranted) return;
 
     await _mapboxMap?.location.updateSettings(
-      LocationComponentSettings(enabled: true, pulsingEnabled: true),
+      LocationComponentSettings(
+        enabled: true,
+        pulsingEnabled: true,
+        // Render the directional puck (Google-Maps-style heading cone) so the
+        // user can see which way they're facing, not just where they are.
+        puckBearingEnabled: true,
+        puckBearing: PuckBearing.HEADING,
+      ),
     );
 
-    // Fix 1: auto-fly to real location on map load
+    // Spin up the shared overlay controller and let it pre-create the
+    // annotation managers + pin image so a later task transition has zero
+    // first-paint latency.
+    final overlay = TaskNavOverlayController(
+      map: _mapboxMap!,
+      onChanged: (route, fetching) {
+        if (!mounted) return;
+        setState(() {
+          _activeRoute = route;
+          _activeRouteFetching = fetching;
+        });
+      },
+    );
+    await overlay.init();
+    if (!mounted) return;
+    _navOverlay = overlay;
+
+    // Auto-fly to real location on map load.
     await _autoGoToLocation();
+
+    // Always-on position stream: drives both the geofence inside/outside
+    // check AND the task navigation re-route trigger so the green polyline
+    // tracks the user as they move (fixing the "line stuck on first
+    // origin" bug).
+    _startPositionStream();
+
+    // If we entered the screen while a task is already IN_PROGRESS, draw
+    // its route now instead of waiting for the next status change.
+    final activeAtMount = ref.read(activeInProgressTaskProvider);
+    if (activeAtMount != null) {
+      await overlay.setTask(activeAtMount, currentPos: _lastPosition);
+    }
   }
 
   /// Fix 2: fetches GPS and flies the camera, showing a loading bar while waiting
@@ -91,165 +135,38 @@ class _RouteScreenState extends State<RouteScreen> {
       final newStatus = await Permission.locationWhenInUse.request();
       if (!newStatus.isGranted) return;
       await _mapboxMap?.location.updateSettings(
-        LocationComponentSettings(enabled: true, pulsingEnabled: true),
+        LocationComponentSettings(
+        enabled: true,
+        pulsingEnabled: true,
+        // Render the directional puck (Google-Maps-style heading cone) so the
+        // user can see which way they're facing, not just where they are.
+        puckBearingEnabled: true,
+        puckBearing: PuckBearing.HEADING,
+      ),
       );
     }
     await _autoGoToLocation();
   }
 
-  // ── Geofence ──────────────────────────────────────────────────────────────
-
-  Future<void> _setGeofence() async {
-    final status = await Permission.locationWhenInUse.status;
-    if (!status.isGranted) return;
-
-    // Fetch GPS first so the form can show it auto-filled
-    final pos = await geo.Geolocator.getCurrentPosition(
-      locationSettings: const geo.LocationSettings(
-        accuracy: geo.LocationAccuracy.high,
-      ),
-    );
-    _lastPosition = pos;
-
-    if (!mounted) return;
-
-    // Show the form — returns true only when API call succeeds
-    final confirmed = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => CreateGeofenceForm(
-        latitude: pos.latitude,
-        longitude: pos.longitude,
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    // Form submitted successfully — now create the geofence on the map
-    final center = Position(pos.longitude, pos.latitude);
-    await _drawGeofenceCircle(center);
-    await _mapboxMap?.flyTo(
-      CameraOptions(
-        center: Point(coordinates: center),
-        zoom: 17.0,
-      ),
-      MapAnimationOptions(duration: 1000),
-    );
-
-    setState(() {
-      _geofenceCenter = center;
-      _geofenceActive = true;
-      _isInsideGeofence = true;
-    });
-
-    _startPositionStream();
-  }
-
-  Future<void> _clearGeofence() async {
-    _positionStream?.cancel();
-    _positionStream = null;
-
-    if (_polygonManager != null && _geofencePolygon != null) {
-      await _polygonManager!.delete(_geofencePolygon!);
-      _geofencePolygon = null;
-    }
-
-    setState(() {
-      _geofenceCenter = null;
-      _geofenceActive = false;
-      _isInsideGeofence = false;
-    });
-  }
-
-  Future<void> _drawGeofenceCircle(Position center) async {
-    if (_polygonManager != null && _geofencePolygon != null) {
-      await _polygonManager!.delete(_geofencePolygon!);
-    }
-    _polygonManager ??=
-        await _mapboxMap!.annotations.createPolygonAnnotationManager();
-
-    _geofencePolygon = await _polygonManager!.create(
-      PolygonAnnotationOptions(
-        geometry: Polygon(coordinates: [_circlePoints(center, _geofenceRadius)]),
-        fillColor: const Color(0xFF157347).toARGB32(),
-        fillOpacity: 0.15,
-        fillOutlineColor: const Color(0xFF157347).toARGB32(),
-      ),
-    );
-  }
-
+  /// Always-on stream while the screen is mounted — feeds the task navigation
+  /// overlay's re-route trigger so the green polyline tracks the user.
   void _startPositionStream() {
+    _positionStream?.cancel();
     _positionStream = geo.Geolocator.getPositionStream(
       locationSettings: const geo.LocationSettings(
         accuracy: geo.LocationAccuracy.high,
-        distanceFilter: 10,
+        // Tighter filter → more frequent fixes so the route polyline
+        // re-anchors to the user in near-realtime as they move.
+        distanceFilter: 5,
       ),
     ).listen(_onPositionUpdate);
   }
 
   void _onPositionUpdate(geo.Position current) {
-    if (_geofenceCenter == null) return;
-
-    final distance = geo.Geolocator.distanceBetween(
-      current.latitude,
-      current.longitude,
-      _geofenceCenter!.lat.toDouble(),
-      _geofenceCenter!.lng.toDouble(),
-    );
-
-    final nowInside = distance <= _geofenceRadius;
-
-    if (nowInside && !_isInsideGeofence) {
-      setState(() => _isInsideGeofence = true);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(children: [
-              Icon(Icons.location_on, color: Colors.white),
-              SizedBox(width: 8),
-              Text('You entered the geofence area!',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
-            ]),
-            backgroundColor: Color(0xFF157347),
-            duration: Duration(seconds: 4),
-          ),
-        );
-      }
-    } else if (!nowInside && _isInsideGeofence) {
-      setState(() => _isInsideGeofence = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(children: [
-              Icon(Icons.location_off, color: Colors.white),
-              SizedBox(width: 8),
-              Text('You left the geofence area.',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
-            ]),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 4),
-          ),
-        );
-      }
-    }
-  }
-
-  List<Position> _circlePoints(Position center, double radiusMeters) {
-    const earthRadius = 6371000.0;
-    final lat = center.lat.toDouble() * math.pi / 180;
-    final lng = center.lng.toDouble() * math.pi / 180;
-    final d = radiusMeters / earthRadius;
-    const n = 64;
-    return List.generate(n + 1, (i) {
-      final bearing = (2 * math.pi * i) / n;
-      final pLat = math.asin(math.sin(lat) * math.cos(d) +
-          math.cos(lat) * math.sin(d) * math.cos(bearing));
-      final pLng = lng +
-          math.atan2(math.sin(bearing) * math.sin(d) * math.cos(lat),
-              math.cos(d) - math.sin(lat) * math.sin(pLat));
-      return Position(pLng * 180 / math.pi, pLat * 180 / math.pi);
-    });
+    _lastPosition = current;
+    // Forward to the navigation overlay — it decides internally whether
+    // the user has moved far enough to warrant a fresh route fetch.
+    _navOverlay?.onPositionUpdate(current);
   }
 
   // ── UI ────────────────────────────────────────────────────────────────────
@@ -258,6 +175,17 @@ class _RouteScreenState extends State<RouteScreen> {
   Widget build(BuildContext context) {
     final hPad = AppResponsive.horizontalPad(context);
     final mapHeight = AppResponsive.hp(context, 30).clamp(180.0, 280.0);
+
+    // React to changes in which task is active (or none). The overlay
+    // controller handles its own no-op short-circuit when the same task is
+    // set twice; we just forward the transition.
+    ref.listen<TaskModel?>(activeInProgressTaskProvider, (prev, next) {
+      if (prev?.id == next?.id) return;
+      _navOverlay?.setTask(next, currentPos: _lastPosition);
+    });
+
+    final activeTask = ref.watch(activeInProgressTaskProvider);
+    final todayCount = ref.watch(todayTasksProvider).length;
 
     return Scaffold(
       backgroundColor: const Color(0xFFFAF8F3),
@@ -284,7 +212,8 @@ class _RouteScreenState extends State<RouteScreen> {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Center(
-              child: Text('8 Shops',
+              child: Text(
+                  todayCount == 1 ? '1 Task' : '$todayCount Tasks',
                   style: TextStyle(
                     color: const Color(0xFF157347),
                     fontWeight: FontWeight.bold,
@@ -293,6 +222,10 @@ class _RouteScreenState extends State<RouteScreen> {
             ),
           ),
         ],
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(66),
+          child: _TrackingToggleBar(),
+        ),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -335,14 +268,6 @@ class _RouteScreenState extends State<RouteScreen> {
                     ),
                   ),
 
-                  // Geofence status chip — top left
-                  if (_geofenceActive)
-                    Positioned(
-                      top: 32,
-                      left: hPad + 8,
-                      child: _StatusChip(inside: _isInsideGeofence),
-                    ),
-
                   // Fullscreen button — top right
                   Positioned(
                     top: 32,
@@ -359,21 +284,6 @@ class _RouteScreenState extends State<RouteScreen> {
                     ),
                   ),
 
-                  // Geofence toggle — bottom left
-                  Positioned(
-                    bottom: 8,
-                    left: hPad + 8,
-                    child: _MapIconButton(
-                      icon: _geofenceActive
-                          ? Icons.fence
-                          : Icons.fence_outlined,
-                      color: _geofenceActive
-                          ? const Color(0xFF157347)
-                          : const Color(0xFF6B7280),
-                      onTap: _geofenceActive ? _clearGeofence : _setGeofence,
-                    ),
-                  ),
-
                   // My location — bottom right
                   Positioned(
                     bottom: 8,
@@ -387,132 +297,17 @@ class _RouteScreenState extends State<RouteScreen> {
               ),
             ),
 
-            // ── Next Stop Card ────────────────────────────────────────────
-            Container(
-              margin: EdgeInsets.symmetric(horizontal: hPad, vertical: 16),
-              padding: EdgeInsets.all(AppResponsive.r(context, 20)),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Center(
-                    child: SizedBox(
-                      width: 40,
-                      child: Divider(thickness: 3, color: Color(0xFFE5E7EB)),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('NEXT STOP',
-                      style: TextStyle(
-                        color: const Color(0xFF6B7280),
-                        fontWeight: FontWeight.w600,
-                        fontSize: AppResponsive.sp(context, 12),
-                      )),
-                  const SizedBox(height: 10),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Starlight Convenience',
-                                style: TextStyle(
-                                  fontSize: AppResponsive.sp(context, 20),
-                                  fontWeight: FontWeight.bold,
-                                )),
-                            const SizedBox(height: 4),
-                            Text('4200 Broadway St, New York',
-                                style: TextStyle(
-                                  fontSize: AppResponsive.sp(context, 14),
-                                  color: const Color(0xFF6B7280),
-                                )),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: AppResponsive.r(context, 10),
-                          vertical: AppResponsive.r(context, 6),
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFD1FADF),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.directions_car,
-                                size: AppResponsive.r(context, 16),
-                                color: const Color(0xFF157347)),
-                            const SizedBox(width: 4),
-                            Text('2.3 km · ~8 min',
-                                style: TextStyle(
-                                  color: const Color(0xFF157347),
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: AppResponsive.sp(context, 12),
-                                )),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: AppResponsive.r(context, 18)),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF157347),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                            padding: EdgeInsets.symmetric(
-                                vertical: AppResponsive.r(context, 14)),
-                          ),
-                          onPressed: () {},
-                          icon: const Icon(Icons.navigation, color: Colors.white),
-                          label: Text('Navigate',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: AppResponsive.sp(context, 15),
-                              )),
-                        ),
-                      ),
-                      SizedBox(width: AppResponsive.r(context, 16)),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Color(0xFF157347)),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                            padding: EdgeInsets.symmetric(
-                                vertical: AppResponsive.r(context, 14)),
-                          ),
-                          onPressed: () {},
-                          icon: const Icon(Icons.phone,
-                              color: Color(0xFF157347)),
-                          label: Text('Call Shop',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: AppResponsive.sp(context, 15),
-                                color: const Color(0xFF157347),
-                              )),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+            // ── Active task / Next stop card ──────────────────────────────
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 16),
+              child: _ActiveNavCard(
+                task: activeTask,
+                route: _activeRoute,
+                routeFetching: _activeRouteFetching,
+                onOpenTask: activeTask == null
+                    ? null
+                    : () => context
+                        .push(AppRoutes.taskDetailPath(activeTask.id)),
               ),
             ),
 
@@ -541,13 +336,8 @@ class _RouteScreenState extends State<RouteScreen> {
 class _MapIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  final Color color;
 
-  const _MapIconButton({
-    required this.icon,
-    required this.onTap,
-    this.color = const Color(0xFF157347),
-  });
+  const _MapIconButton({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -567,42 +357,384 @@ class _MapIconButton extends StatelessWidget {
             ),
           ],
         ),
-        child: Icon(icon, color: color, size: 20),
+        child: Icon(icon, color: const Color(0xFF157347), size: 20),
       ),
     );
   }
 }
 
-class _StatusChip extends StatelessWidget {
-  final bool inside;
-  const _StatusChip({required this.inside});
+class _TrackingToggleBar extends ConsumerWidget {
+  const _TrackingToggleBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tracking = ref.watch(trackingNotifierProvider);
+    final isActive = tracking.isActive;
+    final accent = const Color(0xFF157347);
+
+    Future<void> onToggle() async {
+      final messenger = ScaffoldMessenger.of(context);
+      final notifier = ref.read(trackingNotifierProvider.notifier);
+      final message = await notifier.toggle();
+      if (!context.mounted) return;
+      final error = ref.read(trackingNotifierProvider).error;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(message ?? error ?? 'Something went wrong'),
+            backgroundColor: message != null ? accent : Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+    }
+
+    return Container(
+      color: Colors.white,
+      padding: EdgeInsets.fromLTRB(
+        AppResponsive.horizontalPad(context),
+        0,
+        AppResponsive.horizontalPad(context),
+        12,
+      ),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: AppResponsive.r(context, 14),
+          vertical: AppResponsive.r(context, 8),
+        ),
+        decoration: BoxDecoration(
+          color: isActive ? const Color(0xFFD1FADF) : const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isActive ? accent : const Color(0xFFE5E7EB),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isActive ? Icons.location_on : Icons.location_off,
+              color: isActive ? accent : const Color(0xFF6B7280),
+              size: AppResponsive.r(context, 20),
+            ),
+            SizedBox(width: AppResponsive.r(context, 10)),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Live Tracking',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: AppResponsive.sp(context, 14),
+                      color: const Color(0xFF111827),
+                    ),
+                  ),
+                  Text(
+                    isActive ? 'Tracking your location' : 'Tracking is off',
+                    style: TextStyle(
+                      fontSize: AppResponsive.sp(context, 12),
+                      color: const Color(0xFF6B7280),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (tracking.isLoading)
+              SizedBox(
+                width: AppResponsive.r(context, 22),
+                height: AppResponsive.r(context, 22),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: accent,
+                ),
+              )
+            else
+              Switch(
+                value: isActive,
+                activeThumbColor: accent,
+                onChanged: (_) => onToggle(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Active task card ──────────────────────────────────────────────────────────
+
+/// Shown directly under the map. When [task] is non-null we surface a
+/// "navigating to" view with live ETA / distance pulled from the Mapbox
+/// Directions response; otherwise we fall back to a friendly empty state
+/// that points the user to the tasks list.
+class _ActiveNavCard extends StatelessWidget {
+  final TaskModel? task;
+  final RouteInfo? route;
+  final bool routeFetching;
+  final VoidCallback? onOpenTask;
+
+  const _ActiveNavCard({
+    required this.task,
+    required this.route,
+    required this.routeFetching,
+    required this.onOpenTask,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: EdgeInsets.all(AppResponsive.r(context, 20)),
       decoration: BoxDecoration(
-        color: inside ? const Color(0xFF157347) : Colors.orange,
-        borderRadius: BorderRadius.circular(20),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 6,
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
       ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Center(
+            child: SizedBox(
+              width: 40,
+              child: Divider(thickness: 3, color: Color(0xFFE5E7EB)),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (task == null)
+            _emptyContent(context)
+          else
+            _activeContent(context, task!),
+        ],
+      ),
+    );
+  }
+
+  // ── Active state ────────────────────────────────────────────────────────
+
+  Widget _activeContent(BuildContext context, TaskModel task) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.circle, size: 8, color: Color(0xFF157347)),
+            const SizedBox(width: 6),
+            Text(
+              'NAVIGATING TO',
+              style: TextStyle(
+                color: const Color(0xFF157347),
+                fontWeight: FontWeight.w700,
+                fontSize: AppResponsive.sp(context, 11),
+                letterSpacing: 0.6,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    task.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: AppResponsive.sp(context, 20),
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (task.description.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      task.description,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppResponsive.sp(context, 14),
+                        color: const Color(0xFF6B7280),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            _EtaPill(route: route, fetching: routeFetching),
+          ],
+        ),
+        SizedBox(height: AppResponsive.r(context, 18)),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF157347),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  padding: EdgeInsets.symmetric(
+                      vertical: AppResponsive.r(context, 14)),
+                ),
+                onPressed: onOpenTask,
+                icon: const Icon(Icons.assignment_outlined,
+                    color: Colors.white),
+                label: Text(
+                  'Open Task',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: AppResponsive.sp(context, 15),
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(width: AppResponsive.r(context, 16)),
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFF157347)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  padding: EdgeInsets.symmetric(
+                      vertical: AppResponsive.r(context, 14)),
+                ),
+                onPressed: () {
+                  // Phone field isn't on the task model yet — placeholder.
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Shop phone number not available yet.'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.phone, color: Color(0xFF157347)),
+                label: Text(
+                  'Call Shop',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: AppResponsive.sp(context, 15),
+                    color: const Color(0xFF157347),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ── Empty state ─────────────────────────────────────────────────────────
+
+  Widget _emptyContent(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'NO ACTIVE TASK',
+          style: TextStyle(
+            color: const Color(0xFF6B7280),
+            fontWeight: FontWeight.w700,
+            fontSize: AppResponsive.sp(context, 11),
+            letterSpacing: 0.6,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Showing your current location',
+          style: TextStyle(
+            fontSize: AppResponsive.sp(context, 18),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Mark a task as IN_PROGRESS to see the route to its shop here.',
+          style: TextStyle(
+            fontSize: AppResponsive.sp(context, 13),
+            color: const Color(0xFF6B7280),
+          ),
+        ),
+        SizedBox(height: AppResponsive.r(context, 16)),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Color(0xFF157347)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
+              padding: EdgeInsets.symmetric(
+                  vertical: AppResponsive.r(context, 12)),
+            ),
+            onPressed: () => context.go(AppRoutes.tasks),
+            icon: const Icon(Icons.list_alt, color: Color(0xFF157347)),
+            label: Text(
+              'View Tasks',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: AppResponsive.sp(context, 14),
+                color: const Color(0xFF157347),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EtaPill extends StatelessWidget {
+  final RouteInfo? route;
+  final bool fetching;
+
+  const _EtaPill({required this.route, required this.fetching});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: AppResponsive.r(context, 10),
+        vertical: AppResponsive.r(context, 6),
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFD1FADF),
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.circle, size: 8, color: Colors.white),
-          const SizedBox(width: 5),
+          if (fetching)
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Color(0xFF157347),
+              ),
+            )
+          else
+            Icon(
+              Icons.directions_car,
+              size: AppResponsive.r(context, 16),
+              color: const Color(0xFF157347),
+            ),
+          const SizedBox(width: 6),
           Text(
-            inside ? 'Inside' : 'Outside',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
+            route == null
+                ? (fetching ? 'Calculating…' : '— · —')
+                : '${route!.prettyDistance} · ${route!.prettyDuration}',
+            style: TextStyle(
+              color: const Color(0xFF157347),
+              fontWeight: FontWeight.w600,
+              fontSize: AppResponsive.sp(context, 12),
             ),
           ),
         ],

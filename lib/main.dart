@@ -3,17 +3,61 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:field_guard_re/core/router/app_router.dart';
+import 'package:field_guard_re/core/router/app_routes.dart';
+import 'package:field_guard_re/core/services/geofence_visit_service.dart';
+import 'package:field_guard_re/core/services/token_refresh_service.dart';
 import 'package:field_guard_re/core/theme/app_theme.dart';
+import 'package:go_router/go_router.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
   MapboxOptions.setAccessToken(dotenv.env['MAPBOX_PUBLIC_TOKEN']!);
+
+  // Close any visit left open by a previous app-kill (flagged exitEstimated)
+  // and flush the persisted upload queue. Fire-and-forget — must not delay
+  // first paint.
+  GeofenceVisitService.instance.recover();
+
   runApp(const ProviderScope(child: MyApp()));
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _onAppResumed();
+    }
+  }
+
+  Future<void> _onAppResumed() async {
+    // Retry any geofence visits that couldn't be uploaded while backgrounded.
+    GeofenceVisitService.instance.flushQueue();
+
+    final isValid = await TokenRefreshService.refreshIfNeeded();
+    if (!isValid) {
+      AppRouter.navigatorKey.currentContext?.go(AppRoutes.login);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

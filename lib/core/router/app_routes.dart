@@ -48,6 +48,17 @@ class AppRoutes {
   /// Visit history list screen
   static const String visitHistory = '/visit-history';
 
+  /// Tasks list screen
+  static const String tasks = '/tasks';
+
+  /// Task detail screen
+  static const String taskDetail = '/task-detail/:id';
+  static String taskDetailPath(int id) => '/task-detail/$id';
+
+  /// Task history screen
+  static const String taskHistory = '/task-history/:id';
+  static String taskHistoryPath(int id) => '/task-history/$id';
+
   /// Notifications center screen
   static const String notifications = '/notifications';
 
@@ -62,4 +73,10 @@ class AppRoutes {
 
   /// Shops list screen
   static const String showShops = '/show-shops';
+
+  /// Shops tab screen (bottom-nav tab)
+  static const String shops = '/shops';
+
+  /// Shop creation map screen (stand-at-shop flow)
+  static const String shopCreateMap = '/shop-create-map';
 }

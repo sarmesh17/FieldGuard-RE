@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:field_guard_re/core/services/upload_service.dart';
 import 'package:field_guard_re/features/auth/presentation/providers/auth_provider.dart';
 import 'package:field_guard_re/features/shops/data/datasources/shop_datasource.dart';
 import 'package:field_guard_re/features/shops/data/datasources/shop_datasource_impl.dart';
@@ -32,12 +33,29 @@ final getShopsUseCaseProvider = Provider<GetShopsUseCase>(
   (ref) => GetShopsUseCase(ref.watch(shopRepositoryProvider)),
 );
 
+final uploadServiceProvider = Provider<UploadService>(
+  (ref) => UploadService(ref.watch(dioProvider)),
+);
+
 final shopNotifierProvider =
     StateNotifierProvider.autoDispose<ShopNotifier, ShopState>(
-  (ref) => ShopNotifier(ref.watch(createShopUseCaseProvider)),
+  (ref) => ShopNotifier(
+    ref.watch(createShopUseCaseProvider),
+    ref.watch(uploadServiceProvider),
+  ),
 );
 
 final shopsListNotifierProvider =
     StateNotifierProvider.autoDispose<ShopsListNotifier, ShopsListState>(
-  (ref) => ShopsListNotifier(ref.watch(getShopsUseCaseProvider)),
+  (ref) {
+    final authState = ref.read(authNotifierProvider);
+    String? role;
+    if (authState is AuthSuccess) {
+      role = authState.response.user.role;
+    }
+    return ShopsListNotifier(
+      ref.watch(getShopsUseCaseProvider),
+      currentUserRole: role,
+    );
+  },
 );
