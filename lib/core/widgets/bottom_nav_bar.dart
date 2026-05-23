@@ -11,8 +11,9 @@ class BottomNavBar extends StatelessWidget {
 
   static const _routes = [
     AppRoutes.home,
+    AppRoutes.shops,
     AppRoutes.route,
-    AppRoutes.visitHistory,
+    AppRoutes.tasks,
     AppRoutes.profile,
   ];
 
@@ -46,22 +47,28 @@ class BottomNavBar extends StatelessWidget {
                 onTap: () => go(0),
               ),
               NavItem(
-                icon: Icons.map_outlined,
-                label: 'Route',
+                icon: Icons.store_outlined,
+                label: 'Shops',
                 isSelected: selectedIndex == 1,
                 onTap: () => go(1),
               ),
               NavItem(
-                icon: Icons.store_outlined,
-                label: 'Visits',
+                icon: Icons.map_outlined,
+                label: 'Route',
                 isSelected: selectedIndex == 2,
                 onTap: () => go(2),
               ),
               NavItem(
-                icon: Icons.person_outline,
-                label: 'Profile',
+                icon: Icons.task_alt_outlined,
+                label: 'Tasks',
                 isSelected: selectedIndex == 3,
                 onTap: () => go(3),
+              ),
+              NavItem(
+                icon: Icons.person_outline,
+                label: 'Profile',
+                isSelected: selectedIndex == 4,
+                onTap: () => go(4),
               ),
             ],
           ),

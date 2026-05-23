@@ -1,16 +1,21 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:field_guard_re/features/shops/data/models/create_shop_request.dart';
 import 'package:field_guard_re/features/shops/presentation/providers/shop_provider.dart';
 
 class CreateGeofenceForm extends ConsumerStatefulWidget {
   final double latitude;
   final double longitude;
+  final String? initialAddress;
 
   const CreateGeofenceForm({
     super.key,
     required this.latitude,
     required this.longitude,
+    this.initialAddress,
   });
 
   @override
@@ -23,6 +28,17 @@ class _CreateGeofenceFormState extends ConsumerState<CreateGeofenceForm> {
   final _addressController = TextEditingController();
   final _contactNameController = TextEditingController();
   final _contactPhoneController = TextEditingController();
+  final _panController = TextEditingController();
+
+  File? _shopPhoto;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialAddress != null) {
+      _addressController.text = widget.initialAddress!;
+    }
+  }
 
   @override
   void dispose() {
@@ -30,12 +46,25 @@ class _CreateGeofenceFormState extends ConsumerState<CreateGeofenceForm> {
     _addressController.dispose();
     _contactNameController.dispose();
     _contactPhoneController.dispose();
+    _panController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickPhoto() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 75,
+    );
+    if (picked != null && mounted) {
+      setState(() => _shopPhoto = File(picked.path));
+    }
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
+    final panText = _panController.text.trim();
     final request = CreateShopRequest(
       name: _nameController.text.trim(),
       address: _addressController.text.trim(),
@@ -43,6 +72,8 @@ class _CreateGeofenceFormState extends ConsumerState<CreateGeofenceForm> {
       longitude: widget.longitude,
       contactName: _contactNameController.text.trim(),
       contactPhone: _contactPhoneController.text.trim(),
+      panNumber: panText.isEmpty ? null : panText,
+      photoFile: _shopPhoto,
     );
 
     final success =
@@ -141,6 +172,48 @@ class _CreateGeofenceFormState extends ConsumerState<CreateGeofenceForm> {
                 ),
                 const SizedBox(height: 20),
 
+                // Shop Photo (Optional)
+                const Text(
+                  'Shop Photo (Optional)',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF374151),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: _pickPhoto,
+                  child: Container(
+                    height: 130,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9FAFB),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE5E7EB)),
+                    ),
+                    clipBehavior: Clip.hardEdge,
+                    child: _shopPhoto != null
+                        ? Image.file(_shopPhoto!, fit: BoxFit.cover)
+                        : const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.photo_camera_outlined,
+                                  size: 36, color: Color(0xFF9CA3AF)),
+                              SizedBox(height: 8),
+                              Text(
+                                'Tap to take shop photo',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Color(0xFF9CA3AF),
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
                 // Shop Name
                 _FormField(
                   controller: _nameController,
@@ -190,6 +263,16 @@ class _CreateGeofenceFormState extends ConsumerState<CreateGeofenceForm> {
                     }
                     return null;
                   },
+                ),
+                const SizedBox(height: 16),
+
+                // PAN Number (Optional)
+                _FormField(
+                  controller: _panController,
+                  label: 'PAN Number (Optional)',
+                  hint: 'e.g. ABCDE1234F',
+                  icon: Icons.credit_card_outlined,
+                  validator: (_) => null,
                 ),
                 const SizedBox(height: 12),
 

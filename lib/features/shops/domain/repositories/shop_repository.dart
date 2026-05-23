@@ -4,5 +4,5 @@ import 'package:field_guard_re/features/shops/data/models/shop_model.dart';
 
 abstract interface class ShopRepository {
   Future<Result<void>> createShop(CreateShopRequest request);
-  Future<Result<List<ShopModel>>> getShops();
+  Future<Result<List<ShopModel>>> getShops({String? source, String? currentUserRole});
 }

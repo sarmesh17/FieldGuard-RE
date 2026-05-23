@@ -8,6 +8,8 @@ class ShopModel {
   final String contactPhone;
   final bool isActive;
   final DateTime? createdAt;
+  final String? createdByRole;
+  final String? shopImage;
 
   const ShopModel({
     required this.id,
@@ -19,9 +21,15 @@ class ShopModel {
     required this.contactPhone,
     required this.isActive,
     this.createdAt,
+    this.createdByRole,
+    this.shopImage,
   });
 
-  factory ShopModel.fromJson(Map<String, dynamic> json) => ShopModel(
+  factory ShopModel.fromJson(
+    Map<String, dynamic> json, {
+    String? createdByRoleOverride,
+  }) =>
+      ShopModel(
         id: json['id'] as int,
         name: json['name'] as String,
         address: json['address'] as String,
@@ -34,5 +42,9 @@ class ShopModel {
         createdAt: json['created_at'] != null
             ? DateTime.tryParse(json['created_at'] as String)
             : null,
+        createdByRole: createdByRoleOverride ??
+            json['created_by_role'] as String? ??
+            (json['creator'] as Map<String, dynamic>?)?['role'] as String?,
+        shopImage: json['shop_image'] as String?,
       );
 }

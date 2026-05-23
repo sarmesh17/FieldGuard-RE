@@ -14,5 +14,7 @@ class ShopRepositoryImpl implements ShopRepository {
       _dataSource.createShop(request);
 
   @override
-  Future<Result<List<ShopModel>>> getShops() => _dataSource.getShops();
+  Future<Result<List<ShopModel>>> getShops(
+          {String? source, String? currentUserRole}) =>
+      _dataSource.getShops(source: source, currentUserRole: currentUserRole);
 }

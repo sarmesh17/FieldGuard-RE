@@ -21,12 +21,58 @@ class ShopDataSourceImpl with ApiRunner implements ShopDataSource {
       });
 
   @override
-  Future<Result<List<ShopModel>>> getShops() => safeCall(() async {
-        final response = await _dio.get(ApiConstant.shopsEndpoint);
+  Future<Result<List<ShopModel>>> getShops(
+          {String? source, String? currentUserRole}) =>
+      safeCall(() async {
+        final response = await _dio.get(
+          ApiConstant.shopsEndpoint,
+          queryParameters: source != null ? {'source': source} : null,
+        );
         final body = response.data as Map<String, dynamic>;
-        final list = body['shops'] as List<dynamic>;
-        return list
-            .map((e) => ShopModel.fromJson(e as Map<String, dynamic>))
-            .toList();
+        final result = <ShopModel>[];
+
+        if (body.containsKey('source')) {
+          // ── Filtered response: { source, shops[{...creator{role}}] } ──
+          // creator.role is embedded — ShopModel.fromJson reads it directly.
+          final shops = (body['shops'] as List<dynamic>?) ?? [];
+          for (final e in shops) {
+            result.add(ShopModel.fromJson(e as Map<String, dynamic>));
+          }
+        } else if (body.containsKey('myShops')) {
+          // ── MANAGER / ADMIN "All" shape: { myShops, sharedWithMe, team } ──
+          final myShops = (body['myShops'] as List<dynamic>?) ?? [];
+          for (final e in myShops) {
+            result.add(ShopModel.fromJson(
+              e as Map<String, dynamic>,
+              createdByRoleOverride: currentUserRole,
+            ));
+          }
+
+          final sharedWithMe =
+              (body['sharedWithMe'] as List<dynamic>?) ?? [];
+          for (final e in sharedWithMe) {
+            result.add(ShopModel.fromJson(e as Map<String, dynamic>));
+          }
+
+          final team = (body['team'] as List<dynamic>?) ?? [];
+          for (final entry in team) {
+            final teamMap = entry as Map<String, dynamic>;
+            final shops = (teamMap['shops'] as List<dynamic>?) ?? [];
+            for (final e in shops) {
+              result.add(ShopModel.fromJson(
+                e as Map<String, dynamic>,
+                createdByRoleOverride: 'EMPLOYEE',
+              ));
+            }
+          }
+        } else {
+          // ── EMPLOYEE "All" shape: { shops: [...] } ──
+          final shops = (body['shops'] as List<dynamic>?) ?? [];
+          for (final e in shops) {
+            result.add(ShopModel.fromJson(e as Map<String, dynamic>));
+          }
+        }
+
+        return result;
       });
 }

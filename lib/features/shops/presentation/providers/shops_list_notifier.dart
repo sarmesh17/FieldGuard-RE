@@ -5,15 +5,20 @@ import 'package:field_guard_re/features/shops/domain/usecases/get_shops_usecase.
 import 'shops_list_state.dart';
 
 class ShopsListNotifier extends StateNotifier<ShopsListState> {
-  ShopsListNotifier(this._getShopsUseCase) : super(const ShopsListInitial()) {
+  ShopsListNotifier(this._getShopsUseCase, {this.currentUserRole})
+      : super(const ShopsListInitial()) {
     fetch();
   }
 
   final GetShopsUseCase _getShopsUseCase;
+  final String? currentUserRole;
 
-  Future<void> fetch() async {
+  Future<void> fetch({String? source}) async {
     state = const ShopsListLoading();
-    final result = await _getShopsUseCase();
+    final result = await _getShopsUseCase(
+      source: source,
+      currentUserRole: currentUserRole,
+    );
     switch (result) {
       case Success(:final data):
         state = ShopsListSuccess(data);

@@ -6,6 +6,11 @@
 	<string>FieldGuard needs your location to show your position on the route map and navigate to shops.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>FieldGuard needs your location to track your route and navigate to shops even in the background.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>fetch</string>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

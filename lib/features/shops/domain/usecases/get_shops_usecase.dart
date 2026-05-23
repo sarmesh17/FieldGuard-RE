@@ -7,5 +7,7 @@ class GetShopsUseCase {
 
   final ShopRepository _repository;
 
-  Future<Result<List<ShopModel>>> call() => _repository.getShops();
+  Future<Result<List<ShopModel>>> call(
+          {String? source, String? currentUserRole}) =>
+      _repository.getShops(source: source, currentUserRole: currentUserRole);
 }

@@ -11,12 +11,15 @@ import '../../features/presentation/screens/new_order_screen/new_order_screen.da
 import '../../features/presentation/screens/collect_payment_screen/collect_payment_screen.dart';
 import '../../features/presentation/screens/sms_sent_screen/sms_sent_screen.dart';
 import '../../features/presentation/screens/daily_summary_screen/daily_summary_screen.dart';
-import '../../features/presentation/screens/visit_history_screen/visit_history_screen.dart';
+import '../../features/tasks/presentation/screens/task_detail_screen.dart';
+import '../../features/tasks/presentation/screens/task_history_screen.dart';
+import '../../features/tasks/presentation/screens/tasks_screen.dart';
 import '../../features/presentation/screens/notifications_screen/notifications_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen/profile_screen.dart';
 import '../../features/profile/presentation/screens/personal_details_screen/personal_details_screen.dart';
 import '../../features/presentation/screens/route_screen/map_fullscreen_screen.dart';
 import '../../features/shops/presentation/screens/shops_list_screen.dart';
+import '../../features/shops/presentation/screens/shop_create_map_screen.dart';
 import '../widgets/main_shell.dart';
 import 'app_routes.dart';
 
@@ -60,8 +63,12 @@ class AppRouter {
             builder: (context, state) => const RouteScreen(),
           ),
           GoRoute(
-            path: AppRoutes.visitHistory,
-            builder: (context, state) => const VisitHistoryScreen(),
+            path: AppRoutes.tasks,
+            builder: (context, state) => const TasksScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.shops,
+            builder: (context, state) => const ShopsListScreen(),
           ),
           GoRoute(
             path: AppRoutes.profile,
@@ -127,6 +134,12 @@ class AppRouter {
         builder: (context, state) => const PersonalDetailsScreen(),
       ),
 
+      // Shop Create Map Screen (stand-at-shop flow, no bottom nav)
+      GoRoute(
+        path: AppRoutes.shopCreateMap,
+        builder: (context, state) => const ShopCreateMapScreen(),
+      ),
+
       // Map Fullscreen Screen
       GoRoute(
         path: AppRoutes.mapFullscreen,
@@ -143,6 +156,25 @@ class AppRouter {
       GoRoute(
         path: AppRoutes.showShops,
         builder: (context, state) => const ShopsListScreen(),
+      ),
+
+      // Task Detail Screen
+      GoRoute(
+        path: AppRoutes.taskDetail,
+        builder: (context, state) {
+          final id = int.parse(state.pathParameters['id']!);
+          return TaskDetailScreen(taskId: id);
+        },
+      ),
+
+      // Task History Screen
+      GoRoute(
+        path: AppRoutes.taskHistory,
+        builder: (context, state) {
+          final id = int.parse(state.pathParameters['id']!);
+          final title = state.uri.queryParameters['title'] ?? 'Task';
+          return TaskHistoryScreen(taskId: id, taskTitle: title);
+        },
       ),
 
     ],
