@@ -145,31 +145,68 @@ void _onStart(ServiceInstance service) async {
   service.on('disarm').listen((_) => geofence.disarm());
 
   StreamSubscription<Position>? sub;
+  Timer? retryTimer;
+
+  // Start the location stream — but ONLY once permission is actually granted.
+  // The service often boots (it's sticky: stopWithTask=false) before the user
+  // grants "Allow all the time", and getPositionStream errors out + dies on a
+  // denied permission with no retry. So we gate on permission and keep
+  // re-checking until it's granted, then (re)subscribe. If the stream errors
+  // or ends, we drop the sub so the watchdog restarts it.
+  Future<void> startStreamIfPermitted() async {
+    if (sub != null) return; // already streaming
+
+    final perm = await Geolocator.checkPermission();
+    final ok = perm == LocationPermission.always ||
+        perm == LocationPermission.whileInUse;
+    if (!ok) {
+      await DebugLogService.instance
+          .log('[bg-service] waiting for location permission ($perm)');
+      return;
+    }
+
+    await DebugLogService.instance.log('[bg-service] starting position stream');
+    sub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 0,
+      ),
+    ).listen(
+      (pos) {
+        DebugLogService.instance.log(
+          '[bg-service] fix lat=${pos.latitude.toStringAsFixed(6)} '
+          'lng=${pos.longitude.toStringAsFixed(6)} '
+          'acc=${pos.accuracy.toStringAsFixed(0)}m',
+        );
+        geofence.onPositionUpdate(pos);
+      },
+      onError: (e) async {
+        await DebugLogService.instance.log('[bg-service] stream error: $e');
+        // Drop the dead subscription so the watchdog re-subscribes once
+        // conditions recover (e.g. permission granted, GPS turned back on).
+        await sub?.cancel();
+        sub = null;
+      },
+      onDone: () async {
+        await sub?.cancel();
+        sub = null;
+      },
+      cancelOnError: true,
+    );
+  }
+
+  // Watchdog: every 10s, (re)start the stream if it isn't running. Covers the
+  // boot-before-permission case and any later stream death.
+  retryTimer = Timer.periodic(
+    const Duration(seconds: 10),
+    (_) => startStreamIfPermitted(),
+  );
+  await startStreamIfPermitted();
 
   service.on('stopService').listen((_) async {
     await DebugLogService.instance.log('[bg-service] stopService received');
+    retryTimer?.cancel();
     await sub?.cancel();
     await service.stopSelf();
   });
-
-  // High-accuracy stream; distanceFilter 0 so we keep getting fixes even when
-  // stationary (needed for geofence dwell detection).
-  sub = Geolocator.getPositionStream(
-    locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 0,
-    ),
-  ).listen(
-    (pos) {
-      DebugLogService.instance.log(
-        '[bg-service] fix lat=${pos.latitude.toStringAsFixed(6)} '
-        'lng=${pos.longitude.toStringAsFixed(6)} '
-        'acc=${pos.accuracy.toStringAsFixed(0)}m',
-      );
-      // Drive geofence detection in this isolate.
-      geofence.onPositionUpdate(pos);
-    },
-    onError: (e) =>
-        DebugLogService.instance.log('[bg-service] stream error: $e'),
-  );
 }
