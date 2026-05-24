@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:field_guard_re/core/services/background_location_service.dart';
 import 'package:field_guard_re/core/services/debug_log_service.dart';
-import 'package:field_guard_re/core/services/geofence_visit_service.dart';
 import 'package:field_guard_re/core/services/notification_service.dart';
 import 'package:field_guard_re/core/utils/result.dart';
 import 'package:field_guard_re/features/tasks/data/models/task_model.dart';
@@ -14,19 +14,20 @@ void _log(String msg) {
   DebugLogService.instance.log('[geofence-event] $msg');
 }
 
-/// Keeps [GeofenceVisitService] armed to the shop of whatever task is
-/// currently IN_PROGRESS, and disarmed when none is.
+/// Points the geofence at the shop of whatever task is currently IN_PROGRESS,
+/// and clears it when none is.
 ///
-/// Mount this once near the top of the app (see `MainShell`) so the geofence
-/// follows the active task regardless of which tab is on screen. Detection
-/// itself runs off [LiveTrackingService]'s position stream — this provider
-/// only points it at the right shop.
+/// Detection runs in the BACKGROUND SERVICE isolate (so it survives the app
+/// being killed), not here — so this provider just relays arm/disarm to that
+/// isolate via [BackgroundLocationService]. The isolate's own
+/// GeofenceVisitService does the actual enter/exit + visit persistence.
+///
+/// Mount once near the top of the app (see `MainShell`).
 final geofenceVisitSyncProvider = Provider<void>((ref) {
   final task = ref.watch(activeInProgressTaskProvider);
-  final service = GeofenceVisitService.instance;
 
   if (task == null) {
-    service.disarm();
+    BackgroundLocationService.disarm();
     return;
   }
 
@@ -35,11 +36,11 @@ final geofenceVisitSyncProvider = Provider<void>((ref) {
   final lat = double.tryParse(task.shopLatitude ?? '');
   final lng = double.tryParse(task.shopLongitude ?? '');
   if (lat == null || lng == null) {
-    service.disarm();
+    BackgroundLocationService.disarm();
     return;
   }
 
-  service.arm(
+  BackgroundLocationService.arm(
     taskId: task.id,
     shopId: task.shop?.id,
     shopLat: lat,
@@ -53,7 +54,8 @@ final geofenceVisitSyncProvider = Provider<void>((ref) {
 /// Cleared automatically on real exit (the task auto-completes then).
 final reachedDestinationTaskIdProvider = StateProvider<int?>((ref) => null);
 
-/// Bridges [GeofenceVisitService]'s enter/exit callbacks into app behaviour:
+/// Bridges geofence enter/exit events (forwarded from the background service
+/// isolate via [BackgroundLocationService.geofenceEvents]) into app behaviour:
 ///
 ///  * ENTER  → fire a "you reached your destination" notification and mark
 ///    [reachedDestinationTaskIdProvider] so the map UI updates.
@@ -62,11 +64,14 @@ final reachedDestinationTaskIdProvider = StateProvider<int?>((ref) => null);
 ///    marker. The completion flips the task out of IN_PROGRESS, so
 ///    [geofenceVisitSyncProvider] disarms the fence on the next rebuild.
 ///
+/// These events only arrive while the UI is alive. If the app was killed
+/// during an exit, the visit itself is still persisted + uploaded by the
+/// isolate; the auto-complete just won't fire until the app reopens (a future
+/// reconcile-on-launch can cover that gap).
+///
 /// Mount once near the top of the app (see `MainShell`) alongside
 /// [geofenceVisitSyncProvider].
 final geofenceEventHandlerProvider = Provider<void>((ref) {
-  final service = GeofenceVisitService.instance;
-
   TaskModel? taskById(int id) {
     final state = ref.read(tasksNotifierProvider);
     if (state is! TasksSuccess) return null;
@@ -76,19 +81,19 @@ final geofenceEventHandlerProvider = Provider<void>((ref) {
     return null;
   }
 
-  service.onEnter = (taskId) {
-    _log('onEnter fired for task=$taskId — reached marker set');
+  Future<void> handleEnter(int taskId) async {
+    _log('enter event for task=$taskId — reached marker set');
     ref.read(reachedDestinationTaskIdProvider.notifier).state = taskId;
     final title = taskById(taskId)?.shop?.name ?? 'your destination';
-    NotificationService.instance.show(
+    await NotificationService.instance.show(
       id: _kGeofenceNotifId,
       title: 'You reached your destination',
       body: 'You have arrived at $title.',
     );
-  };
+  }
 
-  service.onRealExit = (taskId) async {
-    _log('onRealExit fired for task=$taskId '
+  Future<void> handleExit(int taskId) async {
+    _log('exit event for task=$taskId '
         '(reached=${ref.read(reachedDestinationTaskIdProvider)})');
     // Only the task we actually reached should auto-complete.
     if (ref.read(reachedDestinationTaskIdProvider) != taskId) {
@@ -98,7 +103,7 @@ final geofenceEventHandlerProvider = Provider<void>((ref) {
     ref.read(reachedDestinationTaskIdProvider.notifier).state = null;
 
     final shopName = taskById(taskId)?.shop?.name ?? 'the location';
-    NotificationService.instance.show(
+    await NotificationService.instance.show(
       id: _kGeofenceNotifId,
       title: 'Task completed',
       body: 'You left $shopName — the task was marked completed.',
@@ -124,12 +129,21 @@ final geofenceEventHandlerProvider = Provider<void>((ref) {
         // Re-arm the reached marker so a later retry/exit can complete it.
         ref.read(reachedDestinationTaskIdProvider.notifier).state = taskId;
     }
-  };
+  }
 
-  ref.onDispose(() {
-    service.onEnter = null;
-    service.onRealExit = null;
+  final sub = BackgroundLocationService.geofenceEvents().listen((event) {
+    if (event == null) return;
+    final type = event['type'] as String?;
+    final taskId = (event['taskId'] as num?)?.toInt();
+    if (taskId == null) return;
+    if (type == 'enter') {
+      handleEnter(taskId);
+    } else if (type == 'exit') {
+      handleExit(taskId);
+    }
   });
+
+  ref.onDispose(sub.cancel);
 });
 
 const _kGeofenceNotifId = 7001;

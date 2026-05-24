@@ -6,6 +6,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'package:field_guard_re/core/services/debug_log_service.dart';
+import 'package:field_guard_re/core/services/geofence_visit_service.dart';
 
 /// Foreground background-service that keeps a high-accuracy location stream
 /// alive in a SEPARATE Dart isolate — surviving the UI being backgrounded or
@@ -63,6 +64,30 @@ class BackgroundLocationService {
 
   /// Asks the isolate to stop itself.
   static void stop() => FlutterBackgroundService().invoke('stopService');
+
+  /// Tells the service isolate which task's shop geofence to watch. The UI
+  /// knows the active task; detection itself runs in the isolate.
+  static void arm({
+    required int taskId,
+    int? shopId,
+    required double shopLat,
+    required double shopLng,
+  }) =>
+      FlutterBackgroundService().invoke('arm', {
+        'taskId': taskId,
+        'shopId': shopId,
+        'shopLat': shopLat,
+        'shopLng': shopLng,
+      });
+
+  /// Tells the service isolate to stop watching (no active task).
+  static void disarm() => FlutterBackgroundService().invoke('disarm');
+
+  /// Stream of geofence transitions forwarded from the isolate. Each event is
+  /// `{type: 'enter'|'exit', taskId: int}`. Only delivered while the UI is
+  /// alive — missed events don't lose the visit (persisted in the isolate).
+  static Stream<Map<String, dynamic>?> geofenceEvents() =>
+      FlutterBackgroundService().on('geofence-event');
 }
 
 /// iOS background-fetch hook — required by the plugin even if unused for now.
@@ -83,6 +108,42 @@ void _onStart(ServiceInstance service) async {
   await DebugLogService.instance.init();
   await DebugLogService.instance.log('[bg-service] isolate started');
 
+  // Detection runs HERE, in the service isolate — so enter/exit + visit
+  // persistence/upload survive the UI being killed. This is a separate
+  // GeofenceVisitService instance from the UI one (isolates don't share
+  // memory); the UI's instance stays idle and only consumes forwarded events.
+  final geofence = GeofenceVisitService.instance;
+
+  // NOTE: recover() is deliberately NOT called here. The persisted open-visit
+  // + upload queue live on shared disk, and the UI isolate already runs
+  // recover() on launch. Running it in both isolates would race on the same
+  // storage with no cross-isolate lock. The isolate detects + closes visits
+  // live; stale opens from a full process death are reconciled by the UI's
+  // recover() on next app open.
+
+  // Forward live transitions to the UI (delivered only while the UI is alive;
+  // missed events are fine — the visit itself is persisted + uploaded here).
+  geofence.onEnter = (taskId) =>
+      service.invoke('geofence-event', {'type': 'enter', 'taskId': taskId});
+  geofence.onRealExit = (taskId) =>
+      service.invoke('geofence-event', {'type': 'exit', 'taskId': taskId});
+
+  // The UI tells us which task's shop to watch (it knows the active task).
+  service.on('arm').listen((data) {
+    if (data == null) return;
+    final taskId = data['taskId'] as int?;
+    final shopLat = (data['shopLat'] as num?)?.toDouble();
+    final shopLng = (data['shopLng'] as num?)?.toDouble();
+    if (taskId == null || shopLat == null || shopLng == null) return;
+    geofence.arm(
+      taskId: taskId,
+      shopId: data['shopId'] as int?,
+      shopLat: shopLat,
+      shopLng: shopLng,
+    );
+  });
+  service.on('disarm').listen((_) => geofence.disarm());
+
   StreamSubscription<Position>? sub;
 
   service.on('stopService').listen((_) async {
@@ -92,7 +153,7 @@ void _onStart(ServiceInstance service) async {
   });
 
   // High-accuracy stream; distanceFilter 0 so we keep getting fixes even when
-  // stationary (needed later for geofence dwell detection).
+  // stationary (needed for geofence dwell detection).
   sub = Geolocator.getPositionStream(
     locationSettings: const LocationSettings(
       accuracy: LocationAccuracy.high,
@@ -105,13 +166,8 @@ void _onStart(ServiceInstance service) async {
         'lng=${pos.longitude.toStringAsFixed(6)} '
         'acc=${pos.accuracy.toStringAsFixed(0)}m',
       );
-      // Forward to the UI isolate too (only delivered while UI is alive).
-      service.invoke('location', {
-        'lat': pos.latitude,
-        'lng': pos.longitude,
-        'acc': pos.accuracy,
-        'ts': pos.timestamp.toUtc().toIso8601String(),
-      });
+      // Drive geofence detection in this isolate.
+      geofence.onPositionUpdate(pos);
     },
     onError: (e) =>
         DebugLogService.instance.log('[bg-service] stream error: $e'),
