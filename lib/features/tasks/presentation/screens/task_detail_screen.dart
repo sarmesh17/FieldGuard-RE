@@ -283,7 +283,15 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
     // state, demote it to PENDING first (with a user-supplied reason).
     if (_selectedStatus == 'IN_PROGRESS' &&
         widget.currentStatus != 'IN_PROGRESS') {
-      final tasksState = ref.read(tasksNotifierProvider);
+      // Make sure we have a fresh list — without it, racing rebuilds could
+      // leave the notifier in TasksLoading/Error and skip the guard, silently
+      // allowing two tasks to be IN_PROGRESS at once.
+      var tasksState = ref.read(tasksNotifierProvider);
+      if (tasksState is! TasksSuccess) {
+        await tasksNotifier.fetch();
+        if (!mounted) return;
+        tasksState = ref.read(tasksNotifierProvider);
+      }
       final ongoing = tasksState is TasksSuccess
           ? tasksState.tasks
               .where(

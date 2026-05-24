@@ -22,8 +22,15 @@ void _log(String msg) {
 /// isolate via [BackgroundLocationService]. The isolate's own
 /// GeofenceVisitService does the actual enter/exit + visit persistence.
 ///
+/// Gated on `TasksSuccess`: while the task list is loading or errored we
+/// neither arm nor disarm — flipping the geofence on a transient empty list
+/// would silently disarm a real in-progress task and lose enter/exit events.
+///
 /// Mount once near the top of the app (see `MainShell`).
 final geofenceVisitSyncProvider = Provider<void>((ref) {
+  final tasksState = ref.watch(tasksNotifierProvider);
+  if (tasksState is! TasksSuccess) return; // don't toggle on Loading/Error.
+
   final task = ref.watch(activeInProgressTaskProvider);
 
   if (task == null) {

@@ -61,8 +61,17 @@ final taskDataSourceProvider = Provider<TaskDataSource>(
   (ref) => TaskDataSourceImpl(ref.watch(dioProvider)),
 );
 
+/// Intentionally NOT autoDispose: this is the app's single source of truth
+/// for the user's task list. Multiple long-lived consumers depend on it being
+/// continuously available (e.g. `activeInProgressTaskProvider` →
+/// `geofenceVisitSyncProvider` for arming the background geofence, and the
+/// task-update sheet's "only one IN_PROGRESS at a time" guard). With
+/// autoDispose, navigating away from a tab let the notifier dispose; the next
+/// rebuild constructed a fresh one that started in `TasksLoading`, which
+/// silently disarmed the geofence and let the demote-reason guard skip,
+/// allowing two tasks to be IN_PROGRESS at once.
 final tasksNotifierProvider =
-    StateNotifierProvider.autoDispose<TasksNotifier, TasksState>(
+    StateNotifierProvider<TasksNotifier, TasksState>(
   (ref) => TasksNotifier(ref.watch(taskDataSourceProvider)),
 );
 
