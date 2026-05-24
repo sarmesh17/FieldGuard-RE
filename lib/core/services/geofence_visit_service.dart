@@ -61,14 +61,19 @@ class GeofenceVisitService {
   // ── Tuning ─────────────────────────────────────────────────────────────
   /// Confirm ENTER at or below this distance from the shop. Also the radius
   /// drawn on the route map so the visible fence matches detection.
-  static const enterRadiusMeters = 20.0;
+  ///
+  /// 30 m (not 20) is the trigger zone: GPS carries 5-10 m error and saved
+  /// shop coordinates are rarely pinpoint, so a tight 20 m fence misses real
+  /// arrivals. The consecutive-fix + hysteresis logic still guards against
+  /// false positives.
+  static const enterRadiusMeters = 30.0;
   static const _enterRadius = enterRadiusMeters;
 
-  /// Only treat the agent as OUTSIDE past this distance — the 20–28 m band is
+  /// Only treat the agent as OUTSIDE past this distance — the 30–40 m band is
   /// a hysteresis dead-zone so a jittery fix can't flap enter/exit.
-  static const _exitRadius = 28.0;
+  static const _exitRadius = 40.0;
 
-  /// Ignore fixes whose accuracy is too coarse to trust against a 20 m fence.
+  /// Ignore fixes whose accuracy is too coarse to trust against the fence.
   static const _maxAccuracy = 35.0;
 
   /// An exit is only confirmed after this many consecutive outside fixes …
