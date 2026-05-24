@@ -10,6 +10,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/router/app_routes.dart';
 import '../../../../core/services/mapbox_directions_service.dart';
 import '../../../../core/theme/app_responsive.dart';
+import '../../../geofence/presentation/providers/geofence_provider.dart';
 import '../../../tasks/data/models/task_model.dart';
 import '../../../tasks/presentation/providers/tasks_provider.dart';
 import '../../../tracking/presentation/providers/tracking_provider.dart';
@@ -58,17 +59,6 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
     final status = await Permission.locationWhenInUse.request();
     if (!status.isGranted) return;
 
-    await _mapboxMap?.location.updateSettings(
-      LocationComponentSettings(
-        enabled: true,
-        pulsingEnabled: true,
-        // Render the directional puck (Google-Maps-style heading cone) so the
-        // user can see which way they're facing, not just where they are.
-        puckBearingEnabled: true,
-        puckBearing: PuckBearing.HEADING,
-      ),
-    );
-
     // Spin up the shared overlay controller and let it pre-create the
     // annotation managers + pin image so a later task transition has zero
     // first-paint latency.
@@ -85,6 +75,20 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
     await overlay.init();
     if (!mounted) return;
     _navOverlay = overlay;
+
+    // Enable the puck AFTER the overlay's managers exist, anchoring it above
+    // the route polyline's layer so the green line renders beneath the dot.
+    await _mapboxMap?.location.updateSettings(
+      LocationComponentSettings(
+        enabled: true,
+        pulsingEnabled: true,
+        // Render the directional puck (Google-Maps-style heading cone) so the
+        // user can see which way they're facing, not just where they are.
+        puckBearingEnabled: true,
+        puckBearing: PuckBearing.HEADING,
+        layerAbove: overlay.routeLayerId,
+      ),
+    );
 
     // Auto-fly to real location on map load.
     await _autoGoToLocation();
@@ -186,6 +190,9 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
 
     final activeTask = ref.watch(activeInProgressTaskProvider);
     final todayCount = ref.watch(todayTasksProvider).length;
+    final reachedTaskId = ref.watch(reachedDestinationTaskIdProvider);
+    final hasReached =
+        activeTask != null && reachedTaskId == activeTask.id;
 
     return Scaffold(
       backgroundColor: const Color(0xFFFAF8F3),
@@ -304,6 +311,7 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
                 task: activeTask,
                 route: _activeRoute,
                 routeFetching: _activeRouteFetching,
+                reached: hasReached,
                 onOpenTask: activeTask == null
                     ? null
                     : () => context
@@ -472,12 +480,14 @@ class _ActiveNavCard extends StatelessWidget {
   final TaskModel? task;
   final RouteInfo? route;
   final bool routeFetching;
+  final bool reached;
   final VoidCallback? onOpenTask;
 
   const _ActiveNavCard({
     required this.task,
     required this.route,
     required this.routeFetching,
+    required this.reached,
     required this.onOpenTask,
   });
 
@@ -523,10 +533,14 @@ class _ActiveNavCard extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Icon(Icons.circle, size: 8, color: Color(0xFF157347)),
+            Icon(
+              reached ? Icons.check_circle : Icons.circle,
+              size: reached ? 14 : 8,
+              color: const Color(0xFF157347),
+            ),
             const SizedBox(width: 6),
             Text(
-              'NAVIGATING TO',
+              reached ? 'ARRIVED' : 'NAVIGATING TO',
               style: TextStyle(
                 color: const Color(0xFF157347),
                 fontWeight: FontWeight.w700,
@@ -553,23 +567,29 @@ class _ActiveNavCard extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  if (task.description.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      task.description,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: AppResponsive.sp(context, 14),
-                        color: const Color(0xFF6B7280),
-                      ),
+                  const SizedBox(height: 4),
+                  Text(
+                    reached
+                        ? 'You reached your destination'
+                        : (task.description.isNotEmpty
+                            ? task.description
+                            : ''),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: AppResponsive.sp(context, 14),
+                      color: reached
+                          ? const Color(0xFF157347)
+                          : const Color(0xFF6B7280),
+                      fontWeight:
+                          reached ? FontWeight.w600 : FontWeight.normal,
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            _EtaPill(route: route, fetching: routeFetching),
+            if (!reached) _EtaPill(route: route, fetching: routeFetching),
           ],
         ),
         SizedBox(height: AppResponsive.r(context, 18)),

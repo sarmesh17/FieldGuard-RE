@@ -4,9 +4,11 @@ class ApiConstant {
 
   // The endpoint for user login
   static const String loginEndpoint = "$baseUrl/api/v1/auth/login";
+  // PATCH (update own profile, EMPLOYEE) + base for profile ops.
   static const String profileEndpoint = "$baseUrl/api/v1/employees/profile";
   static const String authMeEndpoint = "$baseUrl/api/v1/auth/me";
   static const String shopsEndpoint = "$baseUrl/api/v1/shops";
+  static String shopDetailEndpoint(int id) => "$baseUrl/api/v1/shops/$id";
   static const String tasksEndpoint = "$baseUrl/api/v1/tasks/my-tasks";
   static String taskDetailEndpoint(int id) => "$baseUrl/api/v1/tasks/$id";
   static String taskUpdateEndpoint(int id) => "$baseUrl/api/v1/tasks/$id";

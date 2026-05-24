@@ -15,11 +15,11 @@ class ProfileRepositoryImpl extends ProfileRepo {
   Future<Result<ProfileResponse>> updateProfile({
     String? fullName,
     String? email,
-    String? imagePath,
+    String? imageKey,
   }) =>
       _dataSource.updateProfile(
         fullName: fullName,
         email: email,
-        imagePath: imagePath,
+        imageKey: imageKey,
       );
 }

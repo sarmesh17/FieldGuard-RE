@@ -39,6 +39,9 @@ class MainShell extends ConsumerWidget {
     // shop (enter/stay/exit tracking) for the whole shell lifetime.
     ref.watch(geofenceVisitSyncProvider);
 
+    // Bridges geofence enter/exit into notifications + auto-complete-on-exit.
+    ref.watch(geofenceEventHandlerProvider);
+
     final location = GoRouterState.of(context).uri.path;
     return Scaffold(
       body: child,

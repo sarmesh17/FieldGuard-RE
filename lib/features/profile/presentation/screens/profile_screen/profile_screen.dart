@@ -3,7 +3,9 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:field_guard_re/core/constants/api_constant.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
+import 'package:field_guard_re/core/services/debug_log_service.dart';
 import 'package:field_guard_re/core/services/geofence_visit_service.dart';
 import 'package:field_guard_re/core/services/token_storage.dart';
 import 'package:field_guard_re/core/theme/app_colors.dart';
@@ -248,18 +250,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                           ),
                         ],
                       ),
-                      child: CircleAvatar(
+                      child: _ProfileAvatar(
+                        imageUrl: response.profileImage,
+                        initials: _initials(response.fullName),
                         radius: AppResponsive.r(context, 40),
-                        backgroundColor:
-                            Colors.white.withValues(alpha: 0.18),
-                        child: Text(
-                          _initials(response.fullName),
-                          style: AppTextStyles.heading1R(context).copyWith(
-                            fontSize: AppResponsive.sp(context, 28),
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.cardWhite,
-                          ),
-                        ),
+                        fontSize: AppResponsive.sp(context, 28),
                       ),
                     ),
                   ),
@@ -470,6 +465,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                 iconBg: const Color(0xFFFFF7ED),
                 onTap: () {},
               ),
+              _Item(
+                icon: Icons.bug_report_outlined,
+                label: 'Debug Logs',
+                iconColor: const Color(0xFFEA580C),
+                iconBg: const Color(0xFFFFF7ED),
+                onTap: () => _showDebugLogs(context),
+              ),
             ],
           ),
         ),
@@ -613,6 +615,105 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
   }
 
   // ── Menu section ──────────────────────────────────────────────────────────
+
+  /// On-device debug log viewer — reads the persisted geofence trace so it can
+  /// be reviewed (and shared to a laptop) in the field without `flutter logs`.
+  void _showDebugLogs(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheetState) {
+            return DraggableScrollableSheet(
+              initialChildSize: 0.85,
+              maxChildSize: 0.95,
+              minChildSize: 0.5,
+              expand: false,
+              builder: (_, scrollCtrl) => Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.bug_report_outlined,
+                            color: Color(0xFFEA580C)),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Debug Logs',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Refresh',
+                          icon: const Icon(Icons.refresh),
+                          onPressed: () => setSheetState(() {}),
+                        ),
+                        IconButton(
+                          tooltip: 'Share',
+                          icon: const Icon(Icons.ios_share),
+                          onPressed: () => DebugLogService.instance.share(),
+                        ),
+                        IconButton(
+                          tooltip: 'Clear',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () async {
+                            await DebugLogService.instance.clear();
+                            setSheetState(() {});
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: FutureBuilder<String>(
+                        future: DebugLogService.instance.read(),
+                        builder: (_, snap) {
+                          if (!snap.hasData) {
+                            return const Center(
+                                child: CircularProgressIndicator());
+                          }
+                          return Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F172A),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: SingleChildScrollView(
+                              controller: scrollCtrl,
+                              child: SelectableText(
+                                snap.data!,
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 11,
+                                  height: 1.4,
+                                  color: Color(0xFF86EFAC),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   Widget _buildSection(
     BuildContext context, {
@@ -988,6 +1089,48 @@ class _ProfileSkeletonState extends State<_ProfileSkeleton>
               radius: 4),
         ],
       ),
+    );
+  }
+}
+
+/// Header avatar — shows the employee's [imageUrl] when present, otherwise
+/// falls back to their [initials]. Tolerates both absolute URLs (the backend
+/// returns a full CloudFront URL) and relative keys.
+class _ProfileAvatar extends StatelessWidget {
+  final String? imageUrl;
+  final String initials;
+  final double radius;
+  final double fontSize;
+
+  const _ProfileAvatar({
+    required this.imageUrl,
+    required this.initials,
+    required this.radius,
+    required this.fontSize,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final raw = imageUrl;
+    final hasImage = raw != null && raw.isNotEmpty;
+    final url = hasImage
+        ? (raw.startsWith('http') ? raw : '${ApiConstant.baseUrl}/$raw')
+        : null;
+
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: Colors.white.withValues(alpha: 0.18),
+      backgroundImage: url != null ? NetworkImage(url) : null,
+      child: url == null
+          ? Text(
+              initials,
+              style: AppTextStyles.heading1R(context).copyWith(
+                fontSize: fontSize,
+                fontWeight: FontWeight.bold,
+                color: AppColors.cardWhite,
+              ),
+            )
+          : null,
     );
   }
 }

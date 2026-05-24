@@ -27,6 +27,12 @@ class UploadService {
   Future<String> uploadShopPhoto(File file) =>
       _upload(file, category: 'shops', entityId: 0);
 
+  /// [userId] must be the authenticated user's own id — the backend's
+  /// `validateAndConfirmImageKey` ties the uploaded key's `profiles/<id>/`
+  /// path to the caller, so an `entityId` of 0 fails the confirm step with 403.
+  Future<String> uploadProfilePhoto(File file, int userId) =>
+      _upload(file, category: 'profiles', entityId: userId);
+
   Future<String> _upload(
     File file, {
     required String category,
@@ -59,7 +65,9 @@ class UploadService {
     );
 
     final body = resp.data!;
-    final uploadUrl = body['url'] as String;
+    // Backend returns the pre-signed PUT URL under `uploadUrl`; tolerate the
+    // legacy `url` key too so this doesn't silently break on contract drift.
+    final uploadUrl = (body['uploadUrl'] ?? body['url']) as String;
     final imageKey = body['imageKey'] as String;
 
     // Step 2 ── PUT file bytes directly to S3 (no auth header).

@@ -20,6 +20,7 @@ import '../../features/profile/presentation/screens/personal_details_screen/pers
 import '../../features/presentation/screens/route_screen/map_fullscreen_screen.dart';
 import '../../features/shops/presentation/screens/shops_list_screen.dart';
 import '../../features/shops/presentation/screens/shop_create_map_screen.dart';
+import '../../features/shops/presentation/screens/shop_detail_screen.dart';
 import '../widgets/main_shell.dart';
 import 'app_routes.dart';
 
@@ -156,6 +157,15 @@ class AppRouter {
       GoRoute(
         path: AppRoutes.showShops,
         builder: (context, state) => const ShopsListScreen(),
+      ),
+
+      // Shop Detail Screen (API-backed full details)
+      GoRoute(
+        path: AppRoutes.shopDetail,
+        builder: (context, state) {
+          final id = int.parse(state.pathParameters['id']!);
+          return ShopDetailScreen(shopId: id);
+        },
       ),
 
       // Task Detail Screen

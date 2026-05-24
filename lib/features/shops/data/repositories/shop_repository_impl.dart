@@ -1,6 +1,7 @@
 import 'package:field_guard_re/core/utils/result.dart';
 import 'package:field_guard_re/features/shops/data/datasources/shop_datasource.dart';
 import 'package:field_guard_re/features/shops/data/models/create_shop_request.dart';
+import 'package:field_guard_re/features/shops/data/models/shop_detail.dart';
 import 'package:field_guard_re/features/shops/data/models/shop_model.dart';
 import 'package:field_guard_re/features/shops/domain/repositories/shop_repository.dart';
 
@@ -17,4 +18,8 @@ class ShopRepositoryImpl implements ShopRepository {
   Future<Result<List<ShopModel>>> getShops(
           {String? source, String? currentUserRole}) =>
       _dataSource.getShops(source: source, currentUserRole: currentUserRole);
+
+  @override
+  Future<Result<ShopDetail>> getShopById(int id) =>
+      _dataSource.getShopById(id);
 }

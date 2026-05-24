@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'package:field_guard_re/core/network/dio_client.dart';
+import 'package:field_guard_re/core/services/debug_log_service.dart';
 import 'package:field_guard_re/features/geofence/data/datasources/geofence_visit_datasource.dart';
 import 'package:field_guard_re/features/geofence/data/models/geofence_visit.dart';
 
@@ -57,8 +59,10 @@ class GeofenceVisitService {
   static final GeofenceVisitService instance = GeofenceVisitService._();
 
   // ── Tuning ─────────────────────────────────────────────────────────────
-  /// Confirm ENTER at or below this distance from the shop.
-  static const _enterRadius = 20.0;
+  /// Confirm ENTER at or below this distance from the shop. Also the radius
+  /// drawn on the route map so the visible fence matches detection.
+  static const enterRadiusMeters = 20.0;
+  static const _enterRadius = enterRadiusMeters;
 
   /// Only treat the agent as OUTSIDE past this distance — the 20–28 m band is
   /// a hysteresis dead-zone so a jittery fix can't flap enter/exit.
@@ -103,6 +107,21 @@ class GeofenceVisitService {
 
   final _Mutex _mutex = _Mutex();
 
+  // ── Event callbacks ───────────────────────────────────────────────────────
+  // Set by the app (e.g. a provider mounted in MainShell) to react to live
+  // geofence transitions — notifications, map UI, auto-complete. Kept as plain
+  // function fields so the service stays framework-agnostic. Fired outside the
+  // mutex via microtask so a slow listener can't stall detection or deadlock.
+
+  /// Called when the agent ENTERS the geofence (a visit opens). [taskId] is the
+  /// active task.
+  void Function(int taskId)? onEnter;
+
+  /// Called when the agent EXITS after a real, observed exit (not an
+  /// app-kill/permission-loss estimate). [taskId] is the task whose visit just
+  /// closed. This is the signal used to auto-complete the task.
+  void Function(int taskId)? onRealExit;
+
   // ── Live detection state ────────────────────────────────────────────────
   _GeofenceState _state = _GeofenceState.disarmed;
   int? _armedTaskId;
@@ -133,6 +152,13 @@ class GeofenceVisitService {
   /// session arms a task or [recover] runs.
   bool _stopped = false;
 
+  /// The task id whose geofence the agent is *currently inside*, or `null` if
+  /// not inside any. Lets UI rebuilt from scratch (e.g. after the app returns
+  /// from background) know the user has already arrived — so it won't redraw a
+  /// route to a destination they're already standing at.
+  int? get insideTaskId =>
+      _state == _GeofenceState.inside ? _armedTaskId : null;
+
   // ── Arming (public entry points — acquire the lock) ───────────────────────
 
   /// Arms the geofence for the active task's shop. Idempotent — re-arming the
@@ -147,8 +173,11 @@ class GeofenceVisitService {
       _mutex.run(() async {
         _stopped = false; // a fresh session is active
         if (_armedTaskId == taskId && _state != _GeofenceState.disarmed) {
+          _log('arm: already armed task=$taskId state=$_state — no-op');
           return; // already armed for this task
         }
+        _log('arm: task=$taskId shop=$shopId @($shopLat,$shopLng) '
+            'radius=${_enterRadius}m');
 
         // Switching tasks while inside → close the previous visit deliberately.
         final previous = _detachOpenVisit();
@@ -176,6 +205,8 @@ class GeofenceVisitService {
   /// so any open visit is closed and sent immediately.
   Future<void> disarm() => _mutex.run(() async {
         if (_state == _GeofenceState.disarmed) return;
+        _log('disarm: task=$_armedTaskId state=$_state '
+            '(open visit will close if inside)');
 
         final open = _detachOpenVisit();
 
@@ -247,8 +278,15 @@ class GeofenceVisitService {
       _mutex.run(() => _onPositionLocked(pos));
 
   Future<void> _onPositionLocked(Position pos) async {
-    if (_state == _GeofenceState.disarmed) return;
-    if (pos.accuracy > _maxAccuracy) return; // accuracy gate
+    if (_state == _GeofenceState.disarmed) {
+      _log('fix ignored: disarmed (no IN_PROGRESS task / tracking off?)');
+      return;
+    }
+    if (pos.accuracy > _maxAccuracy) {
+      _log('fix rejected: accuracy ${pos.accuracy.toStringAsFixed(0)}m '
+          '> ${_maxAccuracy}m gate');
+      return; // accuracy gate
+    }
 
     // Teleport rejection — drop a single physically-impossible jump, but
     // accept a sustained relocation (2+ consecutive) so we don't lock up.
@@ -277,13 +315,19 @@ class GeofenceVisitService {
     final dist = Geolocator.distanceBetween(
       pos.latitude, pos.longitude, shopLat, shopLng,
     );
+    _log('fix: dist=${dist.toStringAsFixed(1)}m '
+        'acc=${pos.accuracy.toStringAsFixed(0)}m state=$_state '
+        '(enter<=${_enterRadius}m exit>${_exitRadius}m)');
 
     switch (_state) {
       case _GeofenceState.disarmed:
         return;
 
       case _GeofenceState.armed:
-        if (dist <= _enterRadius) await _enterLocked(pos);
+        if (dist <= _enterRadius) {
+          _log('ENTER confirmed @ ${dist.toStringAsFixed(1)}m');
+          await _enterLocked(pos);
+        }
 
       case _GeofenceState.inside:
         if (dist <= _exitRadius) {
@@ -306,6 +350,8 @@ class GeofenceVisitService {
           final longEnough =
               DateTime.now().difference(_firstOutsideAt!) >= _exitConfirmWindow;
           if (_outsideCount >= _exitConfirmFixes || longEnough) {
+            _log('EXIT confirmed @ ${dist.toStringAsFixed(1)}m '
+                '(outsideCount=$_outsideCount)');
             final ov = _openVisit;
             _openVisit = null;
             _state = _GeofenceState.armed; // re-armable → re-entry = new visit
@@ -320,6 +366,11 @@ class GeofenceVisitService {
                 exitLng: pos.longitude,
                 exitEstimated: false,
               );
+              // Real, observed exit after a genuine entry — the signal the app
+              // uses to auto-complete the task. Fired off the mutex.
+              final taskId = ov.taskId;
+              final cb = onRealExit;
+              if (cb != null) scheduleMicrotask(() => cb(taskId));
             }
           }
         }
@@ -342,8 +393,15 @@ class GeofenceVisitService {
     _state = _GeofenceState.inside;
     _outsideCount = 0;
     _firstOutsideAt = null;
+    _log('visit opened: id=${_openVisit!.visitId} task=$_armedTaskId '
+        '— now INSIDE, watchdog started');
     await _persistOpenVisit();
     _startWatchdog();
+
+    // Notify listeners off the mutex so a slow handler can't stall detection.
+    final taskId = _openVisit!.taskId;
+    final cb = onEnter;
+    if (cb != null) scheduleMicrotask(() => cb(taskId));
   }
 
   // ── Stale-anchor watchdog ─────────────────────────────────────────────────
@@ -443,8 +501,15 @@ class GeofenceVisitService {
       exitEstimated: exitEstimated,
     );
     // Min-stay filter — drop boundary noise and drive-bys.
-    if (visit.stayDurationSeconds < _minStaySeconds) return;
+    if (visit.stayDurationSeconds < _minStaySeconds) {
+      _log('visit DROPPED: stay=${visit.stayDurationSeconds}s '
+          '< min ${_minStaySeconds}s (id=${visit.visitId})');
+      return;
+    }
 
+    _log('visit closed & queued: id=${visit.visitId} '
+        'stay=${visit.stayDurationSeconds}s estimated=$exitEstimated '
+        '— uploading');
     final queue = await _readQueue();
     queue.add(visit);
     await _writeQueue(queue);
@@ -485,6 +550,7 @@ class GeofenceVisitService {
         if (visit == null) break;
 
         final result = await _dataSource.submit(visit); // network — no lock
+        _log('upload result=$result for id=${visit.visitId}');
 
         final transient = await _mutex.run<bool>(() async {
           final queue = await _readQueue();
@@ -557,6 +623,15 @@ class GeofenceVisitService {
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
+
+  /// Debug-only trace of the detection pipeline. Compiled out of release
+  /// builds (guarded by [kDebugMode]); grep logcat for `[geofence]`.
+  static void _log(String msg) {
+    // Mirror to the console (debug) AND the on-device file so geofence traces
+    // can be reviewed in the field without a laptop attached.
+    if (kDebugMode) debugPrint('[geofence] $msg');
+    DebugLogService.instance.log('[geofence] $msg');
+  }
 
   /// Generates a RFC-4122 v4 UUID using a cryptographic RNG — used as the
   /// per-visit idempotency key the backend dedupes on.

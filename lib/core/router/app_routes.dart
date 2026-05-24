@@ -79,4 +79,8 @@ class AppRoutes {
 
   /// Shop creation map screen (stand-at-shop flow)
   static const String shopCreateMap = '/shop-create-map';
+
+  /// Shop detail screen (API-backed full details)
+  static const String shopDetail = '/shop-detail/:id';
+  static String shopDetailPath(int id) => '/shop-detail/$id';
 }
