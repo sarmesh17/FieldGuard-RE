@@ -240,6 +240,15 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
       _navOverlay?.setTask(next, currentPos: _lastPosition);
     });
 
+    // Arrival is owned by the geofence ENTER/EXIT event (background isolate),
+    // surfaced via reachedDestinationTaskIdProvider — NOT a local distance
+    // check. Relay it to the overlay so the route line/ETA hide exactly when
+    // the geofence says "arrived", keeping map + detection in sync.
+    ref.listen<int?>(reachedDestinationTaskIdProvider, (prev, next) {
+      final activeId = ref.read(activeInProgressTaskProvider)?.id;
+      _navOverlay?.setReached(next != null && next == activeId);
+    });
+
     // React to the Live Tracking master switch. ON→OFF tears down all
     // GPS-driven UI (stream, puck, nav overlay). OFF→ON resumes setup.
     ref.listen<bool>(

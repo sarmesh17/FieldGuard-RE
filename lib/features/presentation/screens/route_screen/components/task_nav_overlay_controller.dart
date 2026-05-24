@@ -127,26 +127,11 @@ class TaskNavOverlayController {
     if (task == null) return;
 
     // Arrival is terminal: once the user has reached the shop's geofence the
-    // route is gone for good. Any further fixes (incl. stepping back outside
-    // the fence) must NOT redraw or re-route — they've arrived.
+    // route is gone for good. Any further fixes must NOT redraw or re-route.
+    // Arrival is driven by the geofence ENTER event in the background isolate
+    // (via `setReached`), NOT a local distance check here — the two location
+    // streams can disagree, which used to leave the route line stuck.
     if (_arrived) return;
-
-    final shopLat = double.tryParse(task.shopLatitude ?? '');
-    final shopLng = double.tryParse(task.shopLongitude ?? '');
-    if (shopLat != null && shopLng != null) {
-      final distToShop = geo.Geolocator.distanceBetween(
-        pos.latitude,
-        pos.longitude,
-        shopLat,
-        shopLng,
-      );
-      if (distToShop <= GeofenceVisitService.enterRadiusMeters) {
-        _arrived = true;
-        await _clearRouteLine();
-        onChanged(null, false);
-        return;
-      }
-    }
 
     // Realtime: re-anchor the drawn polyline to the user's live position on
     // every fix — instant, no network. The throttled re-route below still
@@ -173,6 +158,24 @@ class TaskNavOverlayController {
     if (dist < _reRouteDistanceMeters && !aged) return;
 
     await _fetchAndDrawRoute(task, pos, fitCamera: false);
+  }
+
+  /// Single source of truth for "arrived", driven by the geofence enter/exit
+  /// event in the background isolate (relayed by the route screen). When true,
+  /// the driving route is removed and never redrawn for this task; when the
+  /// task changes, [setTask]/[clear] resets it. Keeping this off the UI's own
+  /// GPS stream is what fixes the route-line / ETA getting stuck out of sync
+  /// with the (separate) detection stream.
+  Future<void> setReached(bool reached) async {
+    if (_disposed) return;
+    if (_arrived == reached) return;
+    _arrived = reached;
+    if (reached) {
+      await _clearRouteLine();
+      onChanged(null, false);
+    }
+    // reached==false (e.g. task changed and a new one isn't reached yet) lets
+    // the next position fix redraw the route normally.
   }
 
   /// Re-anchors the drawn polyline so it starts at [pos] and runs to the
