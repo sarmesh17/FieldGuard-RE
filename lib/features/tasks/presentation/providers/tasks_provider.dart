@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:field_guard_re/core/errors/app_exception.dart';
 import 'package:field_guard_re/core/services/background_location_service.dart';
-import 'package:field_guard_re/core/services/live_tracking_service.dart';
 import 'package:field_guard_re/core/utils/result.dart';
 import 'package:field_guard_re/features/auth/presentation/providers/auth_provider.dart';
 import 'package:field_guard_re/features/tasks/data/datasources/task_datasource.dart';
@@ -9,6 +8,7 @@ import 'package:field_guard_re/features/tasks/data/datasources/task_datasource_i
 import 'package:field_guard_re/features/tasks/data/models/task_model.dart';
 import 'package:field_guard_re/features/tasks/data/models/task_history_entry.dart';
 import 'package:field_guard_re/features/tasks/data/models/update_task_request.dart';
+import 'package:field_guard_re/features/tracking/presentation/providers/tracking_provider.dart';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -112,10 +112,9 @@ class TaskUpdateError extends TaskUpdateState {
 // ── Update notifier ───────────────────────────────────────────────────────────
 
 class TaskUpdateNotifier extends StateNotifier<TaskUpdateState> {
-  TaskUpdateNotifier(this._dataSource, this._ref) : super(const TaskUpdateIdle());
+  TaskUpdateNotifier(this._dataSource) : super(const TaskUpdateIdle());
 
   final TaskDataSource _dataSource;
-  final Ref _ref;
 
   Future<bool> update(int id, UpdateTaskRequest request) async {
     state = const TaskUpdateLoading();
@@ -126,46 +125,22 @@ class TaskUpdateNotifier extends StateNotifier<TaskUpdateState> {
           exception is AppException ? exception.message : exception.toString(),
         ),
     };
-    if (state is TaskUpdateSuccess) {
-      await _syncTaskTracking(updatedTaskId: id, newStatus: request.status);
-    }
     return state is TaskUpdateSuccess;
   }
 
-  /// Reflects the server-side `active_tasks:employee:{id}` set on the client:
-  /// keep the live socket open while the employee has at least one task in
-  /// IN_PROGRESS, tear it down (for the `'task'` reason) otherwise. The manual
-  /// toggle holds its own reason so it isn't affected.
-  Future<void> _syncTaskTracking({
-    required int updatedTaskId,
-    required String? newStatus,
-  }) async {
-    if (newStatus == 'IN_PROGRESS') {
-      try {
-        await LiveTrackingService.instance.start(reason: 'task');
-      } catch (_) {/* permission/network failures shouldn't block the update */}
-      return;
-    }
-
-    // Transitioning away from IN_PROGRESS: only release the 'task' reason if
-    // no other task is still IN_PROGRESS. We rely on the locally cached task
-    // list when available; otherwise we conservatively release.
-    final tasksState = _ref.read(tasksNotifierProvider);
-    final stillActive = tasksState is TasksSuccess &&
-        tasksState.tasks.any(
-          (t) => t.id != updatedTaskId && t.status == 'IN_PROGRESS',
-        );
-    if (!stillActive) {
-      await LiveTrackingService.instance.stop(reason: 'task');
-    }
-  }
+  // NOTE: previously this notifier auto-started/stopped LiveTrackingService
+  // on task status changes (`'task'` reason). That's gone now — Live Tracking
+  // is solely user-controlled via the Route screen toggle, and the task-
+  // update sheet refuses to flip a task to IN_PROGRESS while tracking is off.
+  // Keeping the auto-start would silently re-enable a session the user
+  // explicitly turned off.
 
   void reset() => state = const TaskUpdateIdle();
 }
 
 final taskUpdateProvider =
     StateNotifierProvider.autoDispose<TaskUpdateNotifier, TaskUpdateState>(
-  (ref) => TaskUpdateNotifier(ref.watch(taskDataSourceProvider), ref),
+  (ref) => TaskUpdateNotifier(ref.watch(taskDataSourceProvider)),
 );
 
 // ── Active task selector ──────────────────────────────────────────────────────
@@ -227,24 +202,28 @@ final activeInProgressTaskProvider = Provider<TaskModel?>((ref) {
 
 // ── Task tracking sync ────────────────────────────────────────────────────────
 
-/// Watches the tasks list and keeps `LiveTrackingService` aligned with the
-/// server's `active_tasks:employee:{id}` set: starts the socket while at
-/// least one task is IN_PROGRESS, releases the `'task'` reason otherwise.
-/// Mount this provider once near the top of the app (e.g. `MainShell`) so it
-/// survives tab/navigation changes.
+/// Drives the kill-proof background location service. It runs ONLY when both
+/// are true:
+///   * Live Tracking is ON (the user is the master switch), and
+///   * at least one task is IN_PROGRESS (otherwise there's nothing to watch).
+///
+/// We deliberately do NOT auto-start `LiveTrackingService` on task progress
+/// any more — the user is the master switch for tracking, and the task-update
+/// sheet refuses to flip a task to IN_PROGRESS while tracking is off.
+///
+/// Mount once near the top of the app (e.g. `MainShell`) so it survives
+/// tab/navigation changes.
 final taskTrackingSyncProvider = Provider<void>((ref) {
   // ref.watch keeps tasksNotifierProvider alive for the lifetime of this sync.
   final tasksState = ref.watch(tasksNotifierProvider);
   if (tasksState is! TasksSuccess) return;
 
+  final trackingOn = ref.watch(trackingNotifierProvider).isActive;
   final hasActive = tasksState.tasks.any((t) => t.status == 'IN_PROGRESS');
-  if (hasActive) {
-    LiveTrackingService.instance.start(reason: 'task').catchError((_) {});
-    // Also run the kill-proof foreground location service (Phase 2a: streams
-    // + logs fixes off the UI isolate; detection moves here in Phase 2b).
+
+  if (trackingOn && hasActive) {
     BackgroundLocationService.start();
   } else {
-    LiveTrackingService.instance.stop(reason: 'task');
     BackgroundLocationService.stop();
   }
 });

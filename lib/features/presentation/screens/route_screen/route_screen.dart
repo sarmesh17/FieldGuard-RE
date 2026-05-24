@@ -56,12 +56,10 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
   }
 
   Future<void> _initMap() async {
-    final status = await Permission.locationWhenInUse.request();
-    if (!status.isGranted) return;
-
     // Spin up the shared overlay controller and let it pre-create the
     // annotation managers + pin image so a later task transition has zero
-    // first-paint latency.
+    // first-paint latency. Safe to do without tracking — these are just
+    // empty Mapbox layers; no GPS is requested.
     final overlay = TaskNavOverlayController(
       map: _mapboxMap!,
       onChanged: (route, fetching) {
@@ -76,34 +74,66 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
     if (!mounted) return;
     _navOverlay = overlay;
 
-    // Enable the puck AFTER the overlay's managers exist, anchoring it above
-    // the route polyline's layer so the green line renders beneath the dot.
-    await _mapboxMap?.location.updateSettings(
+    // Only request permission and start GPS / puck / streams if the user has
+    // turned Live Tracking on. Otherwise we leave the map idle and wait for
+    // them to flip the toggle — `_resumeForTracking` runs then.
+    if (ref.read(trackingNotifierProvider).isActive) {
+      await _resumeForTracking();
+    }
+  }
+
+  /// Brings up the GPS-dependent parts of the map: location permission, the
+  /// puck, an initial camera fly-to, the live position stream, and the active
+  /// task's route. Called on map load (if tracking is already on) and again
+  /// whenever the user flips Live Tracking on.
+  Future<void> _resumeForTracking() async {
+    if (!mounted) return;
+    final map = _mapboxMap;
+    final overlay = _navOverlay;
+    if (map == null || overlay == null) return;
+
+    final status = await Permission.locationWhenInUse.request();
+    if (!status.isGranted || !mounted) return;
+
+    // Enable the puck above the route polyline's layer so the green line
+    // renders beneath the dot.
+    await map.location.updateSettings(
       LocationComponentSettings(
         enabled: true,
         pulsingEnabled: true,
-        // Render the directional puck (Google-Maps-style heading cone) so the
-        // user can see which way they're facing, not just where they are.
         puckBearingEnabled: true,
         puckBearing: PuckBearing.HEADING,
         layerAbove: overlay.routeLayerId,
       ),
     );
 
-    // Auto-fly to real location on map load.
     await _autoGoToLocation();
-
-    // Always-on position stream: drives both the geofence inside/outside
-    // check AND the task navigation re-route trigger so the green polyline
-    // tracks the user as they move (fixing the "line stuck on first
-    // origin" bug).
     _startPositionStream();
 
-    // If we entered the screen while a task is already IN_PROGRESS, draw
-    // its route now instead of waiting for the next status change.
+    // If a task is already IN_PROGRESS when tracking comes on, draw its
+    // route immediately instead of waiting for the next status change.
     final activeAtMount = ref.read(activeInProgressTaskProvider);
     if (activeAtMount != null) {
       await overlay.setTask(activeAtMount, currentPos: _lastPosition);
+    }
+  }
+
+  /// Tears the GPS-dependent parts down when the user turns Live Tracking
+  /// off. The map widget itself stays mounted (a grey overlay covers it in
+  /// the UI); we just stop draining battery / asking for fixes.
+  Future<void> _suspendForTracking() async {
+    await _positionStream?.cancel();
+    _positionStream = null;
+    await _navOverlay?.clear();
+    await _mapboxMap?.location.updateSettings(
+      LocationComponentSettings(enabled: false),
+    );
+    _lastPosition = null;
+    if (mounted) {
+      setState(() {
+        _activeRoute = null;
+        _activeRouteFetching = false;
+      });
     }
   }
 
@@ -134,6 +164,9 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
   }
 
   Future<void> _goToMyLocation() async {
+    // No-op when Live Tracking is off — UI's "my location" button is hidden
+    // in that state, but guard anyway in case of a race.
+    if (!ref.read(trackingNotifierProvider).isActive) return;
     final status = await Permission.locationWhenInUse.status;
     if (!status.isGranted) {
       final newStatus = await Permission.locationWhenInUse.request();
@@ -188,6 +221,23 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
       _navOverlay?.setTask(next, currentPos: _lastPosition);
     });
 
+    // React to the Live Tracking master switch. ON→OFF tears down all
+    // GPS-driven UI (stream, puck, nav overlay). OFF→ON resumes setup.
+    ref.listen<bool>(
+      trackingNotifierProvider.select((s) => s.isActive),
+      (prev, next) {
+        if (prev == next) return;
+        if (next) {
+          _resumeForTracking();
+        } else {
+          _suspendForTracking();
+        }
+      },
+    );
+
+    final trackingActive = ref.watch(
+      trackingNotifierProvider.select((s) => s.isActive),
+    );
     final activeTask = ref.watch(activeInProgressTaskProvider);
     final todayCount = ref.watch(todayTasksProvider).length;
     final reachedTaskId = ref.watch(reachedDestinationTaskIdProvider);
@@ -269,37 +319,47 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
                                   backgroundColor: Color(0xFFD1FADF),
                                 ),
                               ),
+                            // Tracking-off curtain: greys the map and tells
+                            // the user to enable Live Tracking. AbsorbPointer
+                            // also blocks pan/zoom — the map is effectively
+                            // inert while tracking is off.
+                            if (!trackingActive)
+                              const Positioned.fill(
+                                child: _TrackingOffOverlay(),
+                              ),
                           ],
                         ),
                       ),
                     ),
                   ),
 
-                  // Fullscreen button — top right
-                  Positioned(
-                    top: 32,
-                    right: hPad + 8,
-                    child: _MapIconButton(
-                      icon: Icons.fullscreen,
-                      onTap: () => context.push(
-                        AppRoutes.mapFullscreen,
-                        extra: {
-                          'lat': _lastPosition?.latitude,
-                          'lng': _lastPosition?.longitude,
-                        },
+                  // Fullscreen button — top right (hidden when tracking off)
+                  if (trackingActive)
+                    Positioned(
+                      top: 32,
+                      right: hPad + 8,
+                      child: _MapIconButton(
+                        icon: Icons.fullscreen,
+                        onTap: () => context.push(
+                          AppRoutes.mapFullscreen,
+                          extra: {
+                            'lat': _lastPosition?.latitude,
+                            'lng': _lastPosition?.longitude,
+                          },
+                        ),
                       ),
                     ),
-                  ),
 
-                  // My location — bottom right
-                  Positioned(
-                    bottom: 8,
-                    right: hPad + 8,
-                    child: _MapIconButton(
-                      icon: Icons.my_location,
-                      onTap: _goToMyLocation,
+                  // My location — bottom right (hidden when tracking off)
+                  if (trackingActive)
+                    Positioned(
+                      bottom: 8,
+                      right: hPad + 8,
+                      child: _MapIconButton(
+                        icon: Icons.my_location,
+                        onTap: _goToMyLocation,
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -340,6 +400,53 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
 }
 
 // ── Shared widgets ────────────────────────────────────────────────────────────
+
+/// Curtain shown over the embedded map while Live Tracking is off — greys
+/// out the tiles, blocks pan/zoom, and prompts the user to flip the toggle.
+/// All GPS-driven UI (puck, route, my-location/fullscreen buttons) is also
+/// torn down separately; this is the visible cue.
+class _TrackingOffOverlay extends StatelessWidget {
+  const _TrackingOffOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return AbsorbPointer(
+      child: Container(
+        color: Colors.white.withValues(alpha: 0.78),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.location_off_outlined,
+              color: Color(0xFF6B7280),
+              size: 34,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Live Tracking is off',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: AppResponsive.sp(context, 14),
+                color: const Color(0xFF111827),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Enable it above to see your route.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppResponsive.sp(context, 12),
+                color: const Color(0xFF6B7280),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _MapIconButton extends StatelessWidget {
   final IconData icon;

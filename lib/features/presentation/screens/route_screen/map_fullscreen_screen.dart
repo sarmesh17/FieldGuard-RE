@@ -11,6 +11,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/services/mapbox_directions_service.dart';
 import '../../../tasks/data/models/task_model.dart';
 import '../../../tasks/presentation/providers/tasks_provider.dart';
+import '../../../tracking/presentation/providers/tracking_provider.dart';
 import 'components/task_nav_overlay_controller.dart';
 
 class MapFullscreenScreen extends ConsumerStatefulWidget {
@@ -210,6 +211,18 @@ class _MapFullscreenScreenState extends ConsumerState<MapFullscreenScreen> {
       if (prev?.id == next?.id) return;
       _navOverlay?.setTask(next, currentPos: _lastPosition);
     });
+
+    // If Live Tracking is turned off while the fullscreen map is open, this
+    // screen has nothing meaningful to show (no puck, no route). Pop back to
+    // the route screen, where the tracking-off overlay greets the user.
+    ref.listen<bool>(
+      trackingNotifierProvider.select((s) => s.isActive),
+      (prev, next) {
+        if (prev == true && next == false && context.mounted) {
+          context.pop();
+        }
+      },
+    );
 
     final activeTask = ref.watch(activeInProgressTaskProvider);
 

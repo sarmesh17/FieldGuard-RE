@@ -8,6 +8,7 @@ import 'package:field_guard_re/core/utils/result.dart';
 import 'package:field_guard_re/features/tasks/data/models/task_model.dart';
 import 'package:field_guard_re/features/tasks/data/models/update_task_request.dart';
 import 'package:field_guard_re/features/tasks/presentation/providers/tasks_provider.dart';
+import 'package:field_guard_re/features/tracking/presentation/providers/tracking_provider.dart';
 
 void _log(String msg) {
   if (kDebugMode) debugPrint('[geofence-event] $msg');
@@ -30,6 +31,18 @@ void _log(String msg) {
 final geofenceVisitSyncProvider = Provider<void>((ref) {
   final tasksState = ref.watch(tasksNotifierProvider);
   if (tasksState is! TasksSuccess) return; // don't toggle on Loading/Error.
+
+  // Tracking-off disarms — even if a task is IN_PROGRESS, the user has
+  // explicitly opted out of location for now. (`taskTrackingSyncProvider`
+  // also stops the background service in this state, so disarm is largely
+  // belt-and-braces — but keeps state consistent if the user re-enables.)
+  final trackingOn = ref.watch(
+    trackingNotifierProvider.select((s) => s.isActive),
+  );
+  if (!trackingOn) {
+    BackgroundLocationService.disarm();
+    return;
+  }
 
   final task = ref.watch(activeInProgressTaskProvider);
 

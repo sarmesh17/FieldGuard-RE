@@ -11,6 +11,7 @@ import 'package:field_guard_re/features/shops/presentation/providers/shop_provid
 import 'package:field_guard_re/features/tasks/data/models/task_model.dart';
 import 'package:field_guard_re/features/tasks/data/models/update_task_request.dart';
 import 'package:field_guard_re/features/tasks/presentation/providers/tasks_provider.dart';
+import 'package:field_guard_re/features/tracking/presentation/providers/tracking_provider.dart';
 
 class TaskDetailScreen extends ConsumerStatefulWidget {
   final int taskId;
@@ -251,6 +252,26 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+
+    // Gate: a task can only go IN_PROGRESS while Live Tracking is on. Without
+    // tracking, the background geofence won't arm, the visit won't be
+    // recorded, and auto-complete-on-exit can't fire — so we refuse the
+    // transition up-front and tell the user to enable tracking first.
+    if (_selectedStatus == 'IN_PROGRESS' &&
+        widget.currentStatus != 'IN_PROGRESS' &&
+        !ref.read(trackingNotifierProvider).isActive) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Enable Live Tracking on the Route screen before starting a task.',
+          ),
+          backgroundColor: Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
 
     // Validate cancel-specific fields (outside the Form validator since they
     // use custom widgets, not TextFormFields).
