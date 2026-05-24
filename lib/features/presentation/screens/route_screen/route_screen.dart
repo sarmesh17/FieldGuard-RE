@@ -240,13 +240,19 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
       _navOverlay?.setTask(next, currentPos: _lastPosition);
     });
 
-    // Arrival is owned by the geofence ENTER/EXIT event (background isolate),
+    // Arrival is owned by the geofence ENTER event (background isolate),
     // surfaced via reachedDestinationTaskIdProvider — NOT a local distance
-    // check. Relay it to the overlay so the route line/ETA hide exactly when
-    // the geofence says "arrived", keeping map + detection in sync.
+    // check. Relay ONLY the arrive (→true) transition: once arrived, the route
+    // stays gone until the active task changes (handled by setTask). We must
+    // NOT setReached(false) when the marker clears on exit — the exit clears
+    // the marker before the auto-complete PATCH lands, so the task is briefly
+    // still IN_PROGRESS, and redrawing the route there put the green line back
+    // on the way out.
     ref.listen<int?>(reachedDestinationTaskIdProvider, (prev, next) {
       final activeId = ref.read(activeInProgressTaskProvider)?.id;
-      _navOverlay?.setReached(next != null && next == activeId);
+      if (next != null && next == activeId) {
+        _navOverlay?.setReached(true);
+      }
     });
 
     // React to the Live Tracking master switch. ON→OFF tears down all
