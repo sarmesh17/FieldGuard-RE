@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:field_guard_re/core/errors/app_exception.dart';
+import 'package:field_guard_re/core/services/background_location_service.dart';
 import 'package:field_guard_re/core/services/live_tracking_service.dart';
 import 'package:field_guard_re/core/utils/result.dart';
 import 'package:field_guard_re/features/auth/presentation/providers/auth_provider.dart';
@@ -230,8 +231,12 @@ final taskTrackingSyncProvider = Provider<void>((ref) {
   final hasActive = tasksState.tasks.any((t) => t.status == 'IN_PROGRESS');
   if (hasActive) {
     LiveTrackingService.instance.start(reason: 'task').catchError((_) {});
+    // Also run the kill-proof foreground location service (Phase 2a: streams
+    // + logs fixes off the UI isolate; detection moves here in Phase 2b).
+    BackgroundLocationService.start();
   } else {
     LiveTrackingService.instance.stop(reason: 'task');
+    BackgroundLocationService.stop();
   }
 });
 

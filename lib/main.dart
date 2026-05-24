@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:field_guard_re/core/router/app_router.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
+import 'package:field_guard_re/core/services/background_location_service.dart';
 import 'package:field_guard_re/core/services/debug_log_service.dart';
 import 'package:field_guard_re/core/services/geofence_visit_service.dart';
 import 'package:field_guard_re/core/services/notification_service.dart';
@@ -21,7 +22,12 @@ void main() async {
 
   // Register the notification channel + request permission up-front so the
   // geofence enter/exit alerts can fire later without a first-time delay.
+  // (Also creates the foreground-service channel the background service uses.)
   await NotificationService.instance.init();
+
+  // Register the background location service isolate (does not start it —
+  // start/stop is driven by whether a task is IN_PROGRESS).
+  await BackgroundLocationService.initialize();
 
   // Close any visit left open by a previous app-kill (flagged exitEstimated)
   // and flush the persisted upload queue. Fire-and-forget — must not delay

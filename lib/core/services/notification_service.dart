@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'package:field_guard_re/core/services/background_location_service.dart';
+
 /// Thin wrapper around [FlutterLocalNotificationsPlugin] for the immediate,
 /// non-scheduled notifications this app fires — currently the geofence
 /// enter/exit alerts. Single source of truth so channel setup and permission
@@ -19,6 +21,16 @@ class NotificationService {
     'Geofence Alerts',
     description: 'Notifies when you reach or leave a task location.',
     importance: Importance.high,
+  );
+
+  /// Low-importance channel for the persistent background-location foreground
+  /// service notification (the always-on "tracking" banner). Low importance so
+  /// it stays silent and unobtrusive.
+  static final _fgServiceChannel = AndroidNotificationChannel(
+    BackgroundLocationService.channelId,
+    'Location Tracking',
+    description: 'Keeps your location updating for assigned tasks.',
+    importance: Importance.low,
   );
 
   bool _initialised = false;
@@ -40,6 +52,7 @@ class NotificationService {
         AndroidFlutterLocalNotificationsPlugin>();
     if (android != null) {
       await android.createNotificationChannel(_channel);
+      await android.createNotificationChannel(_fgServiceChannel);
       await android.requestNotificationsPermission();
     }
 
