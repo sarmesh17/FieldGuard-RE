@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:field_guard_re/core/services/background_location_service.dart';
+import 'package:field_guard_re/core/services/debug_log_service.dart';
 
 /// Thin wrapper around [FlutterLocalNotificationsPlugin] for the immediate,
 /// non-scheduled notifications this app fires — currently the geofence
@@ -41,19 +42,29 @@ class NotificationService {
     if (_initialised) return;
     _initialised = true;
 
-    const androidInit =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings();
-    await _plugin.initialize(
-      const InitializationSettings(android: androidInit, iOS: iosInit),
-    );
+    try {
+      const androidInit =
+          AndroidInitializationSettings('@mipmap/ic_launcher');
+      const iosInit = DarwinInitializationSettings();
+      await _plugin.initialize(
+        const InitializationSettings(android: androidInit, iOS: iosInit),
+      );
 
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    if (android != null) {
-      await android.createNotificationChannel(_channel);
-      await android.createNotificationChannel(_fgServiceChannel);
-      await android.requestNotificationsPermission();
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      if (android != null) {
+        await android.createNotificationChannel(_channel);
+        await android.createNotificationChannel(_fgServiceChannel);
+        final granted = await android.requestNotificationsPermission();
+        await DebugLogService.instance
+            .log('[notification] init ok android permission=$granted');
+      }
+    } catch (e, st) {
+      // Don't leave _initialised=true if init crashed — let it retry next time.
+      _initialised = false;
+      await DebugLogService.instance
+          .log('[notification] init FAILED err=$e $st');
+      rethrow;
     }
 
     final ios = _plugin.resolvePlatformSpecificImplementation<
@@ -81,8 +92,12 @@ class NotificationService {
     );
     try {
       await _plugin.show(id, title, body, details);
-    } catch (e) {
+      await DebugLogService.instance
+          .log('[notification] shown id=$id title="$title"');
+    } catch (e, st) {
       if (kDebugMode) debugPrint('[notification] show failed: $e');
+      await DebugLogService.instance
+          .log('[notification] show FAILED id=$id title="$title" err=$e $st');
     }
   }
 }

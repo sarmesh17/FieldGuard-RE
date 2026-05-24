@@ -41,6 +41,12 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
   RouteInfo? _activeRoute;
   bool _activeRouteFetching = false;
 
+  /// Live straight-line distance (metres) from the user to the active task's
+  /// shop, recomputed on every GPS fix. Drives the nav-card distance label so
+  /// it updates in real time as the user walks in — unlike the driving-route
+  /// ETA, which only refreshes on a throttled re-route and can look "stuck".
+  double? _straightLineToShop;
+
   @override
   void dispose() {
     _positionStream?.cancel();
@@ -133,6 +139,7 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
       setState(() {
         _activeRoute = null;
         _activeRouteFetching = false;
+        _straightLineToShop = null;
       });
     }
   }
@@ -204,6 +211,18 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
     // Forward to the navigation overlay — it decides internally whether
     // the user has moved far enough to warrant a fresh route fetch.
     _navOverlay?.onPositionUpdate(current);
+
+    // Live straight-line distance to the active shop for the nav-card label.
+    final task = ref.read(activeInProgressTaskProvider);
+    final shopLat = double.tryParse(task?.shopLatitude ?? '');
+    final shopLng = double.tryParse(task?.shopLongitude ?? '');
+    final dist = (shopLat != null && shopLng != null)
+        ? geo.Geolocator.distanceBetween(
+            current.latitude, current.longitude, shopLat, shopLng)
+        : null;
+    if (dist != _straightLineToShop && mounted) {
+      setState(() => _straightLineToShop = dist);
+    }
   }
 
   // ── UI ────────────────────────────────────────────────────────────────────
@@ -372,6 +391,7 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
                 route: _activeRoute,
                 routeFetching: _activeRouteFetching,
                 reached: hasReached,
+                straightLineMeters: _straightLineToShop,
                 onOpenTask: activeTask == null
                     ? null
                     : () => context
@@ -588,6 +608,7 @@ class _ActiveNavCard extends StatelessWidget {
   final RouteInfo? route;
   final bool routeFetching;
   final bool reached;
+  final double? straightLineMeters;
   final VoidCallback? onOpenTask;
 
   const _ActiveNavCard({
@@ -595,6 +616,7 @@ class _ActiveNavCard extends StatelessWidget {
     required this.route,
     required this.routeFetching,
     required this.reached,
+    required this.straightLineMeters,
     required this.onOpenTask,
   });
 
@@ -696,7 +718,12 @@ class _ActiveNavCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            if (!reached) _EtaPill(route: route, fetching: routeFetching),
+            if (!reached)
+              _EtaPill(
+                route: route,
+                fetching: routeFetching,
+                straightLineMeters: straightLineMeters,
+              ),
           ],
         ),
         SizedBox(height: AppResponsive.r(context, 18)),
@@ -822,7 +849,33 @@ class _EtaPill extends StatelessWidget {
   final RouteInfo? route;
   final bool fetching;
 
-  const _EtaPill({required this.route, required this.fetching});
+  /// Live straight-line distance to the shop (metres). Preferred over the
+  /// driving distance because it updates on every GPS fix — the driving route
+  /// only re-fetches on a throttled trigger, so near the destination it looks
+  /// frozen (e.g. stuck on "30 m").
+  final double? straightLineMeters;
+
+  const _EtaPill({
+    required this.route,
+    required this.fetching,
+    required this.straightLineMeters,
+  });
+
+  String _label() {
+    final m = straightLineMeters;
+    if (m != null) {
+      final dist = m < 1000
+          ? '${m.round()} m'
+          : '${(m / 1000).toStringAsFixed(1)} km';
+      // Append the driving ETA when it's available and the user isn't already
+      // basically on top of the shop.
+      if (route != null && m > 50) return '$dist · ${route!.prettyDuration}';
+      return '$dist away';
+    }
+    // No live fix yet — fall back to the driving route, or a placeholder.
+    if (route != null) return '${route!.prettyDistance} · ${route!.prettyDuration}';
+    return fetching ? 'Calculating…' : '— · —';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -838,7 +891,7 @@ class _EtaPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (fetching)
+          if (fetching && straightLineMeters == null)
             const SizedBox(
               width: 14,
               height: 14,
@@ -855,9 +908,7 @@ class _EtaPill extends StatelessWidget {
             ),
           const SizedBox(width: 6),
           Text(
-            route == null
-                ? (fetching ? 'Calculating…' : '— · —')
-                : '${route!.prettyDistance} · ${route!.prettyDuration}',
+            _label(),
             style: TextStyle(
               color: const Color(0xFF157347),
               fontWeight: FontWeight.w600,

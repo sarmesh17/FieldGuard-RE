@@ -88,6 +88,14 @@ class BackgroundLocationService {
   /// alive — missed events don't lose the visit (persisted in the isolate).
   static Stream<Map<String, dynamic>?> geofenceEvents() =>
       FlutterBackgroundService().on('geofence-event');
+
+  /// Fires once the service isolate has finished registering its listeners.
+  /// The UI must (re)send the current arm state on this signal, because a
+  /// prior `arm()` invoke during the isolate's cold start is silently dropped
+  /// (invoke has no buffering). Without this handshake the geofence can stay
+  /// disarmed forever even though a task is IN_PROGRESS.
+  static Stream<Map<String, dynamic>?> onReady() =>
+      FlutterBackgroundService().on('bg-ready');
 }
 
 /// iOS background-fetch hook — required by the plugin even if unused for now.
@@ -143,6 +151,12 @@ void _onStart(ServiceInstance service) async {
     );
   });
   service.on('disarm').listen((_) => geofence.disarm());
+
+  // Listeners are now registered. Tell the UI we're ready so it can (re)send
+  // the current arm state — `invoke` is fire-and-forget with no buffering, so
+  // an `arm` sent before this point during a cold start would have been lost.
+  service.invoke('bg-ready');
+  await DebugLogService.instance.log('[bg-service] ready — requested arm state');
 
   StreamSubscription<Position>? sub;
   Timer? retryTimer;

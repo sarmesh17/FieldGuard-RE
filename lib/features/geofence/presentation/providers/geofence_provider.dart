@@ -15,6 +15,27 @@ void _log(String msg) {
   DebugLogService.instance.log('[geofence-event] $msg');
 }
 
+/// The last arm command the UI computed, so it can be re-sent to the service
+/// isolate the moment that isolate signals it's ready (its listeners are up).
+/// `null` means "disarm".
+({int taskId, int? shopId, double lat, double lng})? _lastArm;
+bool _bgReadyListenerWired = false;
+
+/// Sends the current desired arm/disarm to the background service isolate.
+void _applyArm() {
+  final a = _lastArm;
+  if (a == null) {
+    BackgroundLocationService.disarm();
+  } else {
+    BackgroundLocationService.arm(
+      taskId: a.taskId,
+      shopId: a.shopId,
+      shopLat: a.lat,
+      shopLng: a.lng,
+    );
+  }
+}
+
 /// Points the geofence at the shop of whatever task is currently IN_PROGRESS,
 /// and clears it when none is.
 ///
@@ -29,6 +50,17 @@ void _log(String msg) {
 ///
 /// Mount once near the top of the app (see `MainShell`).
 final geofenceVisitSyncProvider = Provider<void>((ref) {
+  // Wire the readiness handshake exactly once. The isolate drops any `arm`
+  // sent before its listeners exist (invoke has no buffering), so when it
+  // emits `bg-ready` we re-send whatever the current arm state is.
+  if (!_bgReadyListenerWired) {
+    _bgReadyListenerWired = true;
+    BackgroundLocationService.onReady().listen((_) {
+      _log('bg-service ready — re-applying arm state');
+      _applyArm();
+    });
+  }
+
   final tasksState = ref.watch(tasksNotifierProvider);
   if (tasksState is! TasksSuccess) return; // don't toggle on Loading/Error.
 
@@ -39,33 +71,16 @@ final geofenceVisitSyncProvider = Provider<void>((ref) {
   final trackingOn = ref.watch(
     trackingNotifierProvider.select((s) => s.isActive),
   );
-  if (!trackingOn) {
-    BackgroundLocationService.disarm();
-    return;
-  }
 
-  final task = ref.watch(activeInProgressTaskProvider);
+  final task =
+      trackingOn ? ref.watch(activeInProgressTaskProvider) : null;
+  final lat = double.tryParse(task?.shopLatitude ?? '');
+  final lng = double.tryParse(task?.shopLongitude ?? '');
 
-  if (task == null) {
-    BackgroundLocationService.disarm();
-    return;
-  }
-
-  // `activeInProgressTaskProvider` already filters to parseable coords, but
-  // re-parse defensively — a task without a valid shop location is skipped.
-  final lat = double.tryParse(task.shopLatitude ?? '');
-  final lng = double.tryParse(task.shopLongitude ?? '');
-  if (lat == null || lng == null) {
-    BackgroundLocationService.disarm();
-    return;
-  }
-
-  BackgroundLocationService.arm(
-    taskId: task.id,
-    shopId: task.shop?.id,
-    shopLat: lat,
-    shopLng: lng,
-  );
+  _lastArm = (task != null && lat != null && lng != null)
+      ? (taskId: task.id, shopId: task.shop?.id, lat: lat, lng: lng)
+      : null;
+  _applyArm();
 });
 
 /// The id of the task whose shop the agent has currently *reached* (is inside
