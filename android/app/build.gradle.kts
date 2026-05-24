@@ -48,4 +48,9 @@ flutter {
 dependencies {
     // Backport of java.time used by flutter_local_notifications.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // OS Geofencing API (GeofencingClient) for native geofence wake-up.
+    // Present transitively via geolocator at runtime, but our own Kotlin needs
+    // it on the compile classpath explicitly.
+    implementation("com.google.android.gms:play-services-location:21.2.0")
 }
