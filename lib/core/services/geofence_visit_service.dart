@@ -561,11 +561,14 @@ class GeofenceVisitService {
         if (visit == null) break;
 
         final result = await _dataSource.submit(visit); // network — no lock
-        _log('upload result=$result for id=${visit.visitId}');
+        final outcome = result.outcome;
+        _log('upload result=$outcome for id=${visit.visitId}');
 
-        if (result == SubmitResult.success) {
+        if (outcome == SubmitResult.success) {
           // Network just succeeded for this task — signal listeners so they
-          // can retry any auto-complete PATCH that failed earlier offline.
+          // refresh (the backend auto-completes the task on this write, so a
+          // refresh surfaces the COMPLETED status). Also covers retrying any
+          // app-side completion that may have failed earlier offline.
           final taskId = visit.taskId;
           final cb = onVisitUploaded;
           if (cb != null) scheduleMicrotask(() => cb(taskId));
@@ -575,7 +578,7 @@ class GeofenceVisitService {
           final queue = await _readQueue();
           final idx = queue.indexWhere((v) => v.visitId == visit.visitId);
           if (idx < 0) return false; // already gone
-          switch (result) {
+          switch (outcome) {
             case SubmitResult.success:
               queue.removeAt(idx);
             case SubmitResult.permanent:
@@ -584,7 +587,7 @@ class GeofenceVisitService {
               queue[idx].attempts++;
           }
           await _writeQueue(queue);
-          return result == SubmitResult.transient;
+          return outcome == SubmitResult.transient;
         });
 
         if (transient) {
