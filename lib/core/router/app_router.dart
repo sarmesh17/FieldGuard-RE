@@ -20,6 +20,7 @@ import '../../features/profile/presentation/screens/personal_details_screen/pers
 import '../../features/presentation/screens/route_screen/map_fullscreen_screen.dart';
 import '../../features/shops/presentation/screens/shops_list_screen.dart';
 import '../../features/shops/presentation/screens/shop_create_map_screen.dart';
+import '../../features/shops/presentation/screens/shop_detail_screen.dart';
 import '../widgets/main_shell.dart';
 import 'app_routes.dart';
 
@@ -95,10 +96,30 @@ class AppRouter {
         builder: (context, state) => const NewOrderScreen(),
       ),
 
-      // Collect Payment Screen
+      // Collect Payment Screen. Requires `extra` with shopId/shopName, plus
+      // an optional taskId so we can invalidate the task on a successful
+      // collection. Falls back to a friendly error screen if anything was
+      // pushed without the required keys (shouldn't happen, but safer than
+      // crashing on a stale deep link).
       GoRoute(
         path: AppRoutes.collectPayment,
-        builder: (context, state) => const CollectPaymentScreen(),
+        builder: (context, state) {
+          final extra = state.extra;
+          if (extra is Map &&
+              extra['shopId'] is int &&
+              extra['shopName'] is String) {
+            return CollectPaymentScreen(
+              shopId: extra['shopId'] as int,
+              shopName: extra['shopName'] as String,
+              taskId: extra['taskId'] is int ? extra['taskId'] as int : null,
+            );
+          }
+          return const Scaffold(
+            body: Center(
+              child: Text('Missing shop context for collection'),
+            ),
+          );
+        },
       ),
 
       // SMS Sent Screen
@@ -156,6 +177,15 @@ class AppRouter {
       GoRoute(
         path: AppRoutes.showShops,
         builder: (context, state) => const ShopsListScreen(),
+      ),
+
+      // Shop Detail Screen (API-backed full details)
+      GoRoute(
+        path: AppRoutes.shopDetail,
+        builder: (context, state) {
+          final id = int.parse(state.pathParameters['id']!);
+          return ShopDetailScreen(shopId: id);
+        },
       ),
 
       // Task Detail Screen

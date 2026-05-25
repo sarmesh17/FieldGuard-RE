@@ -10,6 +10,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/router/app_routes.dart';
 import '../../../../core/services/mapbox_directions_service.dart';
 import '../../../../core/theme/app_responsive.dart';
+import '../../../geofence/presentation/providers/geofence_provider.dart';
 import '../../../tasks/data/models/task_model.dart';
 import '../../../tasks/presentation/providers/tasks_provider.dart';
 import '../../../tracking/presentation/providers/tracking_provider.dart';
@@ -40,6 +41,12 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
   RouteInfo? _activeRoute;
   bool _activeRouteFetching = false;
 
+  /// Live straight-line distance (metres) from the user to the active task's
+  /// shop, recomputed on every GPS fix. Drives the nav-card distance label so
+  /// it updates in real time as the user walks in — unlike the driving-route
+  /// ETA, which only refreshes on a throttled re-route and can look "stuck".
+  double? _straightLineToShop;
+
   @override
   void dispose() {
     _positionStream?.cancel();
@@ -55,23 +62,10 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
   }
 
   Future<void> _initMap() async {
-    final status = await Permission.locationWhenInUse.request();
-    if (!status.isGranted) return;
-
-    await _mapboxMap?.location.updateSettings(
-      LocationComponentSettings(
-        enabled: true,
-        pulsingEnabled: true,
-        // Render the directional puck (Google-Maps-style heading cone) so the
-        // user can see which way they're facing, not just where they are.
-        puckBearingEnabled: true,
-        puckBearing: PuckBearing.HEADING,
-      ),
-    );
-
     // Spin up the shared overlay controller and let it pre-create the
     // annotation managers + pin image so a later task transition has zero
-    // first-paint latency.
+    // first-paint latency. Safe to do without tracking — these are just
+    // empty Mapbox layers; no GPS is requested.
     final overlay = TaskNavOverlayController(
       map: _mapboxMap!,
       onChanged: (route, fetching) {
@@ -86,20 +80,67 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
     if (!mounted) return;
     _navOverlay = overlay;
 
-    // Auto-fly to real location on map load.
-    await _autoGoToLocation();
+    // Only request permission and start GPS / puck / streams if the user has
+    // turned Live Tracking on. Otherwise we leave the map idle and wait for
+    // them to flip the toggle — `_resumeForTracking` runs then.
+    if (ref.read(trackingNotifierProvider).isActive) {
+      await _resumeForTracking();
+    }
+  }
 
-    // Always-on position stream: drives both the geofence inside/outside
-    // check AND the task navigation re-route trigger so the green polyline
-    // tracks the user as they move (fixing the "line stuck on first
-    // origin" bug).
+  /// Brings up the GPS-dependent parts of the map: location permission, the
+  /// puck, an initial camera fly-to, the live position stream, and the active
+  /// task's route. Called on map load (if tracking is already on) and again
+  /// whenever the user flips Live Tracking on.
+  Future<void> _resumeForTracking() async {
+    if (!mounted) return;
+    final map = _mapboxMap;
+    final overlay = _navOverlay;
+    if (map == null || overlay == null) return;
+
+    final status = await Permission.locationWhenInUse.request();
+    if (!status.isGranted || !mounted) return;
+
+    // Enable the puck above the route polyline's layer so the green line
+    // renders beneath the dot.
+    await map.location.updateSettings(
+      LocationComponentSettings(
+        enabled: true,
+        pulsingEnabled: true,
+        puckBearingEnabled: true,
+        puckBearing: PuckBearing.HEADING,
+        layerAbove: overlay.routeLayerId,
+      ),
+    );
+
+    await _autoGoToLocation();
     _startPositionStream();
 
-    // If we entered the screen while a task is already IN_PROGRESS, draw
-    // its route now instead of waiting for the next status change.
+    // If a task is already IN_PROGRESS when tracking comes on, draw its
+    // route immediately instead of waiting for the next status change.
     final activeAtMount = ref.read(activeInProgressTaskProvider);
     if (activeAtMount != null) {
       await overlay.setTask(activeAtMount, currentPos: _lastPosition);
+    }
+  }
+
+  /// Tears the GPS-dependent parts down when the user turns Live Tracking
+  /// off. The map widget itself stays mounted (a grey overlay covers it in
+  /// the UI); we just stop draining battery / asking for fixes.
+  Future<void> _suspendForTracking() async {
+    await _positionStream?.cancel();
+    _positionStream = null;
+    await _navOverlay?.clear();
+    await _mapboxMap?.location.updateSettings(
+      LocationComponentSettings(enabled: false),
+    );
+    _lastPosition = null;
+    if (mounted) {
+      setState(() {
+        _activeRoute = null;
+        _activeRouteFetching = false;
+        _straightLineToShop = null;
+      });
     }
   }
 
@@ -130,6 +171,9 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
   }
 
   Future<void> _goToMyLocation() async {
+    // No-op when Live Tracking is off — UI's "my location" button is hidden
+    // in that state, but guard anyway in case of a race.
+    if (!ref.read(trackingNotifierProvider).isActive) return;
     final status = await Permission.locationWhenInUse.status;
     if (!status.isGranted) {
       final newStatus = await Permission.locationWhenInUse.request();
@@ -167,6 +211,18 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
     // Forward to the navigation overlay — it decides internally whether
     // the user has moved far enough to warrant a fresh route fetch.
     _navOverlay?.onPositionUpdate(current);
+
+    // Live straight-line distance to the active shop for the nav-card label.
+    final task = ref.read(activeInProgressTaskProvider);
+    final shopLat = double.tryParse(task?.shopLatitude ?? '');
+    final shopLng = double.tryParse(task?.shopLongitude ?? '');
+    final dist = (shopLat != null && shopLng != null)
+        ? geo.Geolocator.distanceBetween(
+            current.latitude, current.longitude, shopLat, shopLng)
+        : null;
+    if (dist != _straightLineToShop && mounted) {
+      setState(() => _straightLineToShop = dist);
+    }
   }
 
   // ── UI ────────────────────────────────────────────────────────────────────
@@ -184,8 +240,43 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
       _navOverlay?.setTask(next, currentPos: _lastPosition);
     });
 
+    // Arrival is owned by the geofence ENTER event (background isolate),
+    // surfaced via reachedDestinationTaskIdProvider — NOT a local distance
+    // check. Relay ONLY the arrive (→true) transition: once arrived, the route
+    // stays gone until the active task changes (handled by setTask). We must
+    // NOT setReached(false) when the marker clears on exit — the exit clears
+    // the marker before the auto-complete PATCH lands, so the task is briefly
+    // still IN_PROGRESS, and redrawing the route there put the green line back
+    // on the way out.
+    ref.listen<int?>(reachedDestinationTaskIdProvider, (prev, next) {
+      final activeId = ref.read(activeInProgressTaskProvider)?.id;
+      if (next != null && next == activeId) {
+        _navOverlay?.setReached(true);
+      }
+    });
+
+    // React to the Live Tracking master switch. ON→OFF tears down all
+    // GPS-driven UI (stream, puck, nav overlay). OFF→ON resumes setup.
+    ref.listen<bool>(
+      trackingNotifierProvider.select((s) => s.isActive),
+      (prev, next) {
+        if (prev == next) return;
+        if (next) {
+          _resumeForTracking();
+        } else {
+          _suspendForTracking();
+        }
+      },
+    );
+
+    final trackingActive = ref.watch(
+      trackingNotifierProvider.select((s) => s.isActive),
+    );
     final activeTask = ref.watch(activeInProgressTaskProvider);
     final todayCount = ref.watch(todayTasksProvider).length;
+    final reachedTaskId = ref.watch(reachedDestinationTaskIdProvider);
+    final hasReached =
+        activeTask != null && reachedTaskId == activeTask.id;
 
     return Scaffold(
       backgroundColor: const Color(0xFFFAF8F3),
@@ -262,37 +353,47 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
                                   backgroundColor: Color(0xFFD1FADF),
                                 ),
                               ),
+                            // Tracking-off curtain: greys the map and tells
+                            // the user to enable Live Tracking. AbsorbPointer
+                            // also blocks pan/zoom — the map is effectively
+                            // inert while tracking is off.
+                            if (!trackingActive)
+                              const Positioned.fill(
+                                child: _TrackingOffOverlay(),
+                              ),
                           ],
                         ),
                       ),
                     ),
                   ),
 
-                  // Fullscreen button — top right
-                  Positioned(
-                    top: 32,
-                    right: hPad + 8,
-                    child: _MapIconButton(
-                      icon: Icons.fullscreen,
-                      onTap: () => context.push(
-                        AppRoutes.mapFullscreen,
-                        extra: {
-                          'lat': _lastPosition?.latitude,
-                          'lng': _lastPosition?.longitude,
-                        },
+                  // Fullscreen button — top right (hidden when tracking off)
+                  if (trackingActive)
+                    Positioned(
+                      top: 32,
+                      right: hPad + 8,
+                      child: _MapIconButton(
+                        icon: Icons.fullscreen,
+                        onTap: () => context.push(
+                          AppRoutes.mapFullscreen,
+                          extra: {
+                            'lat': _lastPosition?.latitude,
+                            'lng': _lastPosition?.longitude,
+                          },
+                        ),
                       ),
                     ),
-                  ),
 
-                  // My location — bottom right
-                  Positioned(
-                    bottom: 8,
-                    right: hPad + 8,
-                    child: _MapIconButton(
-                      icon: Icons.my_location,
-                      onTap: _goToMyLocation,
+                  // My location — bottom right (hidden when tracking off)
+                  if (trackingActive)
+                    Positioned(
+                      bottom: 8,
+                      right: hPad + 8,
+                      child: _MapIconButton(
+                        icon: Icons.my_location,
+                        onTap: _goToMyLocation,
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -304,6 +405,8 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
                 task: activeTask,
                 route: _activeRoute,
                 routeFetching: _activeRouteFetching,
+                reached: hasReached,
+                straightLineMeters: _straightLineToShop,
                 onOpenTask: activeTask == null
                     ? null
                     : () => context
@@ -332,6 +435,53 @@ class _RouteScreenState extends ConsumerState<RouteScreen> {
 }
 
 // ── Shared widgets ────────────────────────────────────────────────────────────
+
+/// Curtain shown over the embedded map while Live Tracking is off — greys
+/// out the tiles, blocks pan/zoom, and prompts the user to flip the toggle.
+/// All GPS-driven UI (puck, route, my-location/fullscreen buttons) is also
+/// torn down separately; this is the visible cue.
+class _TrackingOffOverlay extends StatelessWidget {
+  const _TrackingOffOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return AbsorbPointer(
+      child: Container(
+        color: Colors.white.withValues(alpha: 0.78),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.location_off_outlined,
+              color: Color(0xFF6B7280),
+              size: 34,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Live Tracking is off',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: AppResponsive.sp(context, 14),
+                color: const Color(0xFF111827),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Enable it above to see your route.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppResponsive.sp(context, 12),
+                color: const Color(0xFF6B7280),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _MapIconButton extends StatelessWidget {
   final IconData icon;
@@ -472,12 +622,16 @@ class _ActiveNavCard extends StatelessWidget {
   final TaskModel? task;
   final RouteInfo? route;
   final bool routeFetching;
+  final bool reached;
+  final double? straightLineMeters;
   final VoidCallback? onOpenTask;
 
   const _ActiveNavCard({
     required this.task,
     required this.route,
     required this.routeFetching,
+    required this.reached,
+    required this.straightLineMeters,
     required this.onOpenTask,
   });
 
@@ -523,10 +677,14 @@ class _ActiveNavCard extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Icon(Icons.circle, size: 8, color: Color(0xFF157347)),
+            Icon(
+              reached ? Icons.check_circle : Icons.circle,
+              size: reached ? 14 : 8,
+              color: const Color(0xFF157347),
+            ),
             const SizedBox(width: 6),
             Text(
-              'NAVIGATING TO',
+              reached ? 'ARRIVED' : 'NAVIGATING TO',
               style: TextStyle(
                 color: const Color(0xFF157347),
                 fontWeight: FontWeight.w700,
@@ -553,23 +711,36 @@ class _ActiveNavCard extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  if (task.description.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      task.description,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: AppResponsive.sp(context, 14),
-                        color: const Color(0xFF6B7280),
-                      ),
+                  const SizedBox(height: 4),
+                  Text(
+                    reached
+                        ? 'You reached your destination'
+                        : (task.description.isNotEmpty
+                            ? task.description
+                            : ''),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: AppResponsive.sp(context, 14),
+                      color: reached
+                          ? const Color(0xFF157347)
+                          : const Color(0xFF6B7280),
+                      fontWeight:
+                          reached ? FontWeight.w600 : FontWeight.normal,
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            _EtaPill(route: route, fetching: routeFetching),
+            if (reached)
+              const _ArrivedPill()
+            else
+              _EtaPill(
+                route: route,
+                fetching: routeFetching,
+                straightLineMeters: straightLineMeters,
+              ),
           ],
         ),
         SizedBox(height: AppResponsive.r(context, 18)),
@@ -691,11 +862,76 @@ class _ActiveNavCard extends StatelessWidget {
   }
 }
 
+/// Replaces the ETA pill once the agent has arrived — a clear green
+/// "Arrived" chip so the card reads as a completed leg, not a stalled ETA.
+class _ArrivedPill extends StatelessWidget {
+  const _ArrivedPill();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: AppResponsive.r(context, 10),
+        vertical: AppResponsive.r(context, 6),
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFF157347),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.check_circle,
+            size: AppResponsive.r(context, 16),
+            color: Colors.white,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'Arrived',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: AppResponsive.sp(context, 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _EtaPill extends StatelessWidget {
   final RouteInfo? route;
   final bool fetching;
 
-  const _EtaPill({required this.route, required this.fetching});
+  /// Live straight-line distance to the shop (metres). Preferred over the
+  /// driving distance because it updates on every GPS fix — the driving route
+  /// only re-fetches on a throttled trigger, so near the destination it looks
+  /// frozen (e.g. stuck on "30 m").
+  final double? straightLineMeters;
+
+  const _EtaPill({
+    required this.route,
+    required this.fetching,
+    required this.straightLineMeters,
+  });
+
+  String _label() {
+    final m = straightLineMeters;
+    if (m != null) {
+      final dist = m < 1000
+          ? '${m.round()} m'
+          : '${(m / 1000).toStringAsFixed(1)} km';
+      // Append the driving ETA when it's available and the user isn't already
+      // basically on top of the shop.
+      if (route != null && m > 50) return '$dist · ${route!.prettyDuration}';
+      return '$dist away';
+    }
+    // No live fix yet — fall back to the driving route, or a placeholder.
+    if (route != null) return '${route!.prettyDistance} · ${route!.prettyDuration}';
+    return fetching ? 'Calculating…' : '— · —';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -711,7 +947,7 @@ class _EtaPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (fetching)
+          if (fetching && straightLineMeters == null)
             const SizedBox(
               width: 14,
               height: 14,
@@ -728,9 +964,7 @@ class _EtaPill extends StatelessWidget {
             ),
           const SizedBox(width: 6),
           Text(
-            route == null
-                ? (fetching ? 'Calculating…' : '— · —')
-                : '${route!.prettyDistance} · ${route!.prettyDuration}',
+            _label(),
             style: TextStyle(
               color: const Color(0xFF157347),
               fontWeight: FontWeight.w600,

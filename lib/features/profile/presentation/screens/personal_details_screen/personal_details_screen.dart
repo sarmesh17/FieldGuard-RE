@@ -95,13 +95,13 @@ class _PersonalDetailsScreenState extends ConsumerState<PersonalDetailsScreen> {
                 leading: const Icon(Icons.camera_alt_outlined,
                     color: AppColors.primaryGreen),
                 title: const Text('Take a photo'),
-                onTap: () => Navigator.pop(context, ImageSource.camera),
+                onTap: () => context.pop(ImageSource.camera),
               ),
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined,
                     color: AppColors.primaryGreen),
                 title: const Text('Choose from gallery'),
-                onTap: () => Navigator.pop(context, ImageSource.gallery),
+                onTap: () => context.pop(ImageSource.gallery),
               ),
             ],
           ),
@@ -126,7 +126,7 @@ class _PersonalDetailsScreenState extends ConsumerState<PersonalDetailsScreen> {
     final result = await ref.read(profileNotifierProvider.notifier).updateProfile(
           fullName: fullName,
           email: email.isEmpty ? null : email,
-          imagePath: _pickedImage?.path,
+          imageFile: _pickedImage,
         );
 
     if (!mounted) return;
@@ -134,8 +134,10 @@ class _PersonalDetailsScreenState extends ConsumerState<PersonalDetailsScreen> {
 
     switch (result) {
       case Success():
+        // Snackbar is queued on the app-level messenger so it survives the
+        // pop and shows on the profile screen we navigate back to.
         _showSnackBar('Profile updated successfully');
-        setState(() => _pickedImage = null); // clear local pick; state has new data
+        context.pop();
       case Failure(:final exception):
         final msg = exception is AppException
             ? exception.message
@@ -199,31 +201,6 @@ class _PersonalDetailsScreenState extends ConsumerState<PersonalDetailsScreen> {
           ),
         ),
         centerTitle: true,
-        actions: [
-          _isSaving
-              ? Padding(
-                  padding: const EdgeInsets.only(right: 16),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.primaryGreen,
-                    ),
-                  ),
-                )
-              : TextButton(
-                  onPressed: _save,
-                  child: Text(
-                    'Save',
-                    style: AppTextStyles.labelR(context).copyWith(
-                      fontSize: AppResponsive.sp(context, 15),
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primaryGreen,
-                    ),
-                  ),
-                ),
-        ],
       ),
       body: SingleChildScrollView(
         child: Column(
