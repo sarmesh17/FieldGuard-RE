@@ -3,9 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:field_guard_re/core/services/background_location_service.dart';
 import 'package:field_guard_re/core/services/debug_log_service.dart';
-import 'package:field_guard_re/core/services/geofence_visit_service.dart';
 import 'package:field_guard_re/core/services/notification_service.dart';
-import 'package:field_guard_re/core/services/os_geofence_service.dart';
 import 'package:field_guard_re/core/utils/result.dart';
 import 'package:field_guard_re/features/tasks/data/models/task_model.dart';
 import 'package:field_guard_re/features/tasks/data/models/update_task_request.dart';
@@ -23,25 +21,17 @@ void _log(String msg) {
 ({int taskId, int? shopId, double lat, double lng})? _lastArm;
 bool _bgReadyListenerWired = false;
 
-/// Sends the current desired arm/disarm to the background service isolate,
-/// and mirrors it to the OS geofence (Phase 3 proof) so transitions still
-/// fire if the app is force-stopped.
+/// Sends the current desired arm/disarm to the background service isolate.
 void _applyArm() {
   final a = _lastArm;
   if (a == null) {
     BackgroundLocationService.disarm();
-    OsGeofenceService.remove();
   } else {
     BackgroundLocationService.arm(
       taskId: a.taskId,
       shopId: a.shopId,
       shopLat: a.lat,
       shopLng: a.lng,
-    );
-    OsGeofenceService.register(
-      lat: a.lat,
-      lng: a.lng,
-      radius: GeofenceVisitService.enterRadiusMeters,
     );
   }
 }
