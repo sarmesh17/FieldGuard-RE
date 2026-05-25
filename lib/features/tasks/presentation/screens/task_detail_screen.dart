@@ -42,7 +42,9 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
   /// Composes the floating actions on the detail screen. The "Navigate"
   /// action is gated on (a) the task being IN_PROGRESS and (b) shop
   /// coordinates being parseable — otherwise the route screen has nothing
-  /// meaningful to show.
+  /// meaningful to show. "Collect Payment" is gated on (a) IN_PROGRESS and
+  /// (b) the task having a shop attached — without a `shopId` the
+  /// collections endpoint has nothing to charge against.
   Widget? _buildFabs(TaskModel task) {
     final isFinal = task.status == 'COMPLETED' || task.status == 'CANCELLED';
     final shopLat = double.tryParse(task.shopLatitude ?? '');
@@ -50,8 +52,10 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
     final canNavigate = task.status == 'IN_PROGRESS' &&
         shopLat != null &&
         shopLng != null;
+    final canCollect =
+        task.status == 'IN_PROGRESS' && task.shop != null;
 
-    if (isFinal && !canNavigate) return null;
+    if (isFinal && !canNavigate && !canCollect) return null;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -70,6 +74,27 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
             icon: const Icon(Icons.navigation_outlined),
             label: const Text(
               'Navigate',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (canCollect) ...[
+          FloatingActionButton.extended(
+            heroTag: 'task-collect-fab',
+            onPressed: () => context.push(
+              AppRoutes.collectPayment,
+              extra: AppRoutes.collectPaymentExtra(
+                shopId: task.shop!.id,
+                shopName: task.shop!.name,
+                taskId: task.id,
+              ),
+            ),
+            backgroundColor: const Color(0xFFB45309),
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.payments_outlined),
+            label: const Text(
+              'Collect Payment',
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
           ),

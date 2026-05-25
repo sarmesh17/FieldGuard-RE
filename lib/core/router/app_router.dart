@@ -96,10 +96,30 @@ class AppRouter {
         builder: (context, state) => const NewOrderScreen(),
       ),
 
-      // Collect Payment Screen
+      // Collect Payment Screen. Requires `extra` with shopId/shopName, plus
+      // an optional taskId so we can invalidate the task on a successful
+      // collection. Falls back to a friendly error screen if anything was
+      // pushed without the required keys (shouldn't happen, but safer than
+      // crashing on a stale deep link).
       GoRoute(
         path: AppRoutes.collectPayment,
-        builder: (context, state) => const CollectPaymentScreen(),
+        builder: (context, state) {
+          final extra = state.extra;
+          if (extra is Map &&
+              extra['shopId'] is int &&
+              extra['shopName'] is String) {
+            return CollectPaymentScreen(
+              shopId: extra['shopId'] as int,
+              shopName: extra['shopName'] as String,
+              taskId: extra['taskId'] is int ? extra['taskId'] as int : null,
+            );
+          }
+          return const Scaffold(
+            body: Center(
+              child: Text('Missing shop context for collection'),
+            ),
+          );
+        },
       ),
 
       // SMS Sent Screen

@@ -36,8 +36,20 @@ class AppRoutes {
   /// New order creation screen
   static const String newOrder = '/new-order';
 
-  /// Payment collection screen
+  /// Payment collection screen. Requires `extra` of shape:
+  ///   `{ 'shopId': int, 'shopName': String, 'taskId': int? }`
+  /// Use [collectPaymentExtra] to build the map safely.
   static const String collectPayment = '/collect-payment';
+  static Map<String, dynamic> collectPaymentExtra({
+    required int shopId,
+    required String shopName,
+    int? taskId,
+  }) =>
+      {
+        'shopId': shopId,
+        'shopName': shopName,
+        'taskId': ?taskId,
+      };
 
   /// SMS sent confirmation screen
   static const String smsSent = '/sms-sent';

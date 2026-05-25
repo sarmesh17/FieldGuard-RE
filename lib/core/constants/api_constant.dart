@@ -16,6 +16,12 @@ class ApiConstant {
   static const String presignedUrlEndpoint = "$baseUrl/api/v1/uploads/presigned-url";
   static const String geofenceVisitsEndpoint = "$baseUrl/api/v1/geofence-visits";
 
+  // Cash/cheque collections — POST records a collection, GET returns the
+  // shop's outstanding ledger summary.
+  static const String collectionsEndpoint = "$baseUrl/api/v1/collections";
+  static String shopOutstandingEndpoint(int shopId) =>
+      "$baseUrl/api/v1/collections/shops/$shopId/outstanding";
+
   // The endpoint for refreshing tokens
   static const String refreshTokenEndpoint =
       "$baseUrl/api/v1/auth/refresh-token";
