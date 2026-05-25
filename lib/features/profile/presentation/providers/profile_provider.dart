@@ -1,8 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:field_guard_re/features/auth/presentation/providers/auth_provider.dart';
 import 'package:field_guard_re/features/profile/data/datasource/profile_data_source.dart';
-import 'package:field_guard_re/features/shops/presentation/providers/shop_provider.dart'
-    show uploadServiceProvider;
 import 'package:field_guard_re/features/profile/data/datasource/profile_data_source_impl.dart';
 import 'package:field_guard_re/features/profile/data/repositories/profile_repository_impl.dart';
 import 'package:field_guard_re/features/profile/domain/repositories/profile_repo.dart';
@@ -35,6 +33,5 @@ final profileNotifierProvider =
   (ref) => ProfileNotifier(
     ref.watch(getProfileUseCaseProvider),
     ref.watch(updateProfileUseCaseProvider),
-    ref.watch(uploadServiceProvider),
   ),
 );

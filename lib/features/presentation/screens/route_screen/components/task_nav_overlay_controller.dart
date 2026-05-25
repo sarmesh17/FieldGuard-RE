@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -6,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
 
-import '../../../../../core/services/geofence_visit_service.dart';
 import '../../../../../core/services/mapbox_directions_service.dart';
 import '../../../../tasks/data/models/task_model.dart';
 
@@ -40,12 +38,10 @@ class TaskNavOverlayController {
 
   PolylineAnnotationManager? _polyManager;
   PointAnnotationManager? _pointManager;
-  PolygonAnnotationManager? _polygonManager;
   Uint8List? _pinImage;
 
   PolylineAnnotation? _routeLine;
   PointAnnotation? _shopPin;
-  PolygonAnnotation? _geofence;
 
   /// Full geometry of the last fetched route in `[lng, lat]` order. Kept so
   /// the polyline can be re-anchored to the user's live position on every
@@ -56,28 +52,13 @@ class TaskNavOverlayController {
   geo.Position? _lastRoutedFrom;
   DateTime _lastRouteAt = DateTime.fromMillisecondsSinceEpoch(0);
   bool _fetching = false;
-
-  /// True once the user has reached the shop's geofence for this task. Arrival
-  /// is final: the route is removed and never redrawn, even if the user later
-  /// steps back outside the fence. Reset only when the task changes.
-  bool _arrived = false;
   bool _disposed = false;
 
   TaskNavOverlayController({required this.map, required this.onChanged});
 
-  /// Layer id of the driving-route polyline manager. The host screen passes
-  /// this as `LocationComponentSettings.layerAbove` so the user puck (blue
-  /// dot) renders ABOVE the route line — i.e. the line is drawn beneath the
-  /// dot, not over it. Null until [init] has run.
-  String? get routeLayerId => _polyManager?.id;
-
   /// One-time setup. Safe to call on a fresh controller; idempotent.
   Future<void> init() async {
     if (_disposed) return;
-    // Order matters — managers render in creation order, so the geofence fill
-    // is created first (drawn beneath), then the route line, then the pin on
-    // top.
-    _polygonManager ??= await map.annotations.createPolygonAnnotationManager();
     _polyManager ??= await map.annotations.createPolylineAnnotationManager();
     _pointManager ??= await map.annotations.createPointAnnotationManager();
     _pinImage ??= await _buildPinImage();
@@ -100,19 +81,7 @@ class TaskNavOverlayController {
     if (_currentTask?.id == task.id) return; // already showing this one
     await clear();
     _currentTask = task;
-    await _drawGeofence(task);
     await _drawPin(task);
-
-    // If the geofence service says we're ALREADY inside this task's fence
-    // (e.g. the screen was rebuilt after returning from background while the
-    // agent stood at the shop), treat it as already-arrived: draw the pin +
-    // fence but never the route. Without this the route flashes back until the
-    // next GPS fix re-triggers arrival.
-    if (GeofenceVisitService.instance.insideTaskId == task.id) {
-      _arrived = true;
-      return;
-    }
-
     if (currentPos != null) {
       await _fetchAndDrawRoute(task, currentPos, fitCamera: fitCamera);
     }
@@ -125,13 +94,6 @@ class TaskNavOverlayController {
     if (_disposed) return;
     final task = _currentTask;
     if (task == null) return;
-
-    // Arrival is terminal: once the user has reached the shop's geofence the
-    // route is gone for good. Any further fixes must NOT redraw or re-route.
-    // Arrival is driven by the geofence ENTER event in the background isolate
-    // (via `setReached`), NOT a local distance check here — the two location
-    // streams can disagree, which used to leave the route line stuck.
-    if (_arrived) return;
 
     // Realtime: re-anchor the drawn polyline to the user's live position on
     // every fix — instant, no network. The throttled re-route below still
@@ -158,24 +120,6 @@ class TaskNavOverlayController {
     if (dist < _reRouteDistanceMeters && !aged) return;
 
     await _fetchAndDrawRoute(task, pos, fitCamera: false);
-  }
-
-  /// Single source of truth for "arrived", driven by the geofence enter/exit
-  /// event in the background isolate (relayed by the route screen). When true,
-  /// the driving route is removed and never redrawn for this task; when the
-  /// task changes, [setTask]/[clear] resets it. Keeping this off the UI's own
-  /// GPS stream is what fixes the route-line / ETA getting stuck out of sync
-  /// with the (separate) detection stream.
-  Future<void> setReached(bool reached) async {
-    if (_disposed) return;
-    if (_arrived == reached) return;
-    _arrived = reached;
-    if (reached) {
-      await _clearRouteLine();
-      onChanged(null, false);
-    }
-    // reached==false (e.g. task changed and a new one isn't reached yet) lets
-    // the next position fix redraw the route normally.
   }
 
   /// Re-anchors the drawn polyline so it starts at [pos] and runs to the
@@ -222,21 +166,6 @@ class TaskNavOverlayController {
     } catch (_) {/* line may have been swapped by a concurrent re-route */}
   }
 
-  /// Deletes just the driving polyline (keeps pin + geofence) and forgets the
-  /// cached route geometry so a later redraw fetches fresh. Used on arrival —
-  /// the user is inside the fence and the route would only clutter the map.
-  Future<void> _clearRouteLine() async {
-    if (_routeLine != null && _polyManager != null) {
-      try {
-        await _polyManager!.delete(_routeLine!);
-      } catch (_) {/* annotation may already be gone */}
-    }
-    _routeLine = null;
-    _routeCoordinates = null;
-    _lastRoutedFrom = null;
-    _lastRouteAt = DateTime.fromMillisecondsSinceEpoch(0);
-  }
-
   /// Removes pin + polyline, resets all internal state. Safe to call when
   /// nothing is drawn.
   Future<void> clear() async {
@@ -250,19 +179,12 @@ class TaskNavOverlayController {
         await _pointManager!.delete(_shopPin!);
       } catch (_) {/* annotation may already be gone */}
     }
-    if (_geofence != null && _polygonManager != null) {
-      try {
-        await _polygonManager!.delete(_geofence!);
-      } catch (_) {/* annotation may already be gone */}
-    }
     _routeLine = null;
     _shopPin = null;
-    _geofence = null;
     _currentTask = null;
     _routeCoordinates = null;
     _lastRoutedFrom = null;
     _lastRouteAt = DateTime.fromMillisecondsSinceEpoch(0);
-    _arrived = false;
     if (!_disposed) onChanged(null, false);
   }
 
@@ -272,60 +194,6 @@ class TaskNavOverlayController {
   }
 
   // ── Internals ────────────────────────────────────────────────────────────
-
-  /// Draws the shop's geofence as a geographically-accurate circle (a 64-point
-  /// polygon) whose radius matches [GeofenceVisitService.enterRadiusMeters], so
-  /// the agent can see exactly how close they must get for the visit to
-  /// register. Scales correctly with zoom because it's defined in lat/lng, not
-  /// screen pixels.
-  Future<void> _drawGeofence(TaskModel task) async {
-    final lat = double.tryParse(task.shopLatitude ?? '');
-    final lng = double.tryParse(task.shopLongitude ?? '');
-    if (lat == null || lng == null) return;
-    if (_polygonManager == null) return;
-
-    final ring = _circlePolygon(
-      lat,
-      lng,
-      GeofenceVisitService.enterRadiusMeters,
-    );
-
-    _geofence = await _polygonManager!.create(
-      PolygonAnnotationOptions(
-        geometry: Polygon(coordinates: [ring]),
-        fillColor: const Color(0xFF1B5E4F).toARGB32(),
-        fillOpacity: 0.12,
-        fillOutlineColor: const Color(0xFF1B5E4F).toARGB32(),
-      ),
-    );
-  }
-
-  /// Returns a closed ring of `[lng, lat]` positions approximating a circle of
-  /// [radiusMeters] around ([centerLat], [centerLng]). The longitude step is
-  /// scaled by `cos(latitude)` so the circle stays round rather than egg-shaped
-  /// away from the equator.
-  static List<Position> _circlePolygon(
-    double centerLat,
-    double centerLng,
-    double radiusMeters, {
-    int points = 64,
-  }) {
-    const earthRadius = 6378137.0; // metres (WGS-84)
-    final latRad = centerLat * math.pi / 180.0;
-    final dLat = (radiusMeters / earthRadius) * 180.0 / math.pi;
-    final dLng =
-        (radiusMeters / (earthRadius * math.cos(latRad))) * 180.0 / math.pi;
-
-    final ring = <Position>[];
-    for (var i = 0; i <= points; i++) {
-      final theta = 2 * math.pi * i / points;
-      ring.add(Position(
-        centerLng + dLng * math.cos(theta),
-        centerLat + dLat * math.sin(theta),
-      ));
-    }
-    return ring;
-  }
 
   Future<void> _drawPin(TaskModel task) async {
     final lat = double.tryParse(task.shopLatitude ?? '');

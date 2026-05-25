@@ -11,7 +11,6 @@ import 'package:field_guard_re/features/shops/presentation/providers/shop_provid
 import 'package:field_guard_re/features/tasks/data/models/task_model.dart';
 import 'package:field_guard_re/features/tasks/data/models/update_task_request.dart';
 import 'package:field_guard_re/features/tasks/presentation/providers/tasks_provider.dart';
-import 'package:field_guard_re/features/tracking/presentation/providers/tracking_provider.dart';
 
 class TaskDetailScreen extends ConsumerStatefulWidget {
   final int taskId;
@@ -42,9 +41,7 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
   /// Composes the floating actions on the detail screen. The "Navigate"
   /// action is gated on (a) the task being IN_PROGRESS and (b) shop
   /// coordinates being parseable — otherwise the route screen has nothing
-  /// meaningful to show. "Collect Payment" is gated on (a) IN_PROGRESS and
-  /// (b) the task having a shop attached — without a `shopId` the
-  /// collections endpoint has nothing to charge against.
+  /// meaningful to show.
   Widget? _buildFabs(TaskModel task) {
     final isFinal = task.status == 'COMPLETED' || task.status == 'CANCELLED';
     final shopLat = double.tryParse(task.shopLatitude ?? '');
@@ -52,10 +49,8 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
     final canNavigate = task.status == 'IN_PROGRESS' &&
         shopLat != null &&
         shopLng != null;
-    final canCollect =
-        task.status == 'IN_PROGRESS' && task.shop != null;
 
-    if (isFinal && !canNavigate && !canCollect) return null;
+    if (isFinal && !canNavigate) return null;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -74,27 +69,6 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
             icon: const Icon(Icons.navigation_outlined),
             label: const Text(
               'Navigate',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          const SizedBox(height: 12),
-        ],
-        if (canCollect) ...[
-          FloatingActionButton.extended(
-            heroTag: 'task-collect-fab',
-            onPressed: () => context.push(
-              AppRoutes.collectPayment,
-              extra: AppRoutes.collectPaymentExtra(
-                shopId: task.shop!.id,
-                shopName: task.shop!.name,
-                taskId: task.id,
-              ),
-            ),
-            backgroundColor: const Color(0xFFB45309),
-            foregroundColor: Colors.white,
-            icon: const Icon(Icons.payments_outlined),
-            label: const Text(
-              'Collect Payment',
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
@@ -164,12 +138,10 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
 
 // ── Update bottom sheet ───────────────────────────────────────────────────────
 
-// COMPLETED is intentionally absent: a task is only ever marked completed
-// automatically when the agent leaves the shop's geofence (see
-// `geofenceEventHandlerProvider`), never manually from this sheet.
 const _kStatuses = [
   ('PENDING', 'Pending'),
   ('IN_PROGRESS', 'In Progress'),
+  ('COMPLETED', 'Completed'),
   ('CANCELLED', 'Cancelled'),
 ];
 
@@ -257,7 +229,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
               leading: const Icon(Icons.camera_alt_outlined),
               title: const Text('Camera'),
               onTap: () {
-                sheetCtx.pop();
+                Navigator.pop(sheetCtx);
                 _pickCancelImage(ImageSource.camera);
               },
             ),
@@ -265,7 +237,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
               leading: const Icon(Icons.photo_library_outlined),
               title: const Text('Gallery'),
               onTap: () {
-                sheetCtx.pop();
+                Navigator.pop(sheetCtx);
                 _pickCancelImage(ImageSource.gallery);
               },
             ),
@@ -277,26 +249,6 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-
-    // Gate: a task can only go IN_PROGRESS while Live Tracking is on. Without
-    // tracking, the background geofence won't arm, the visit won't be
-    // recorded, and auto-complete-on-exit can't fire — so we refuse the
-    // transition up-front and tell the user to enable tracking first.
-    if (_selectedStatus == 'IN_PROGRESS' &&
-        widget.currentStatus != 'IN_PROGRESS' &&
-        !ref.read(trackingNotifierProvider).isActive) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Enable Live Tracking on the Route screen before starting a task.',
-          ),
-          backgroundColor: Color(0xFFDC2626),
-          behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 4),
-        ),
-      );
-      return;
-    }
 
     // Validate cancel-specific fields (outside the Form validator since they
     // use custom widgets, not TextFormFields).
@@ -319,7 +271,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
     // the sheet *after* a chain of awaits and tree mutations, by which point
     // `context` may no longer have a Scaffold or Navigator ancestor.
     final messenger = ScaffoldMessenger.of(context);
-    final router = GoRouter.of(context);
+    final navigator = Navigator.of(context);
     final tasksNotifier = ref.read(tasksNotifierProvider.notifier);
     final updateNotifier = ref.read(taskUpdateProvider.notifier);
     final onSuccess = widget.onSuccess;
@@ -329,15 +281,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
     // state, demote it to PENDING first (with a user-supplied reason).
     if (_selectedStatus == 'IN_PROGRESS' &&
         widget.currentStatus != 'IN_PROGRESS') {
-      // Make sure we have a fresh list — without it, racing rebuilds could
-      // leave the notifier in TasksLoading/Error and skip the guard, silently
-      // allowing two tasks to be IN_PROGRESS at once.
-      var tasksState = ref.read(tasksNotifierProvider);
-      if (tasksState is! TasksSuccess) {
-        await tasksNotifier.fetch();
-        if (!mounted) return;
-        tasksState = ref.read(tasksNotifierProvider);
-      }
+      final tasksState = ref.read(tasksNotifierProvider);
       final ongoing = tasksState is TasksSuccess
           ? tasksState.tasks
               .where(
@@ -416,30 +360,24 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
     }
     if (!mounted) return;
 
-    // Pop the sheet FIRST, then defer every tree-mutating side-effect to the
-    // next frame. `navigator.pop()` only *starts* the sheet's exit transition —
-    // the modal route (and its Form, which owns `_formKey`) stays mounted in the
-    // overlay until the animation settles. Invalidating `taskDetailProvider` /
-    // `fetch()` synchronously here rebuilds the detail screen + route-tab tree
-    // while that Form is still alive, so the GlobalKey lands in two live subtrees
-    // for a frame → "Duplicate GlobalKeys detected". Running them post-frame lets
-    // the sheet finish unmounting first.
-    router.pop();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      onSuccess();
-      // Fire-and-forget: keep the global tasks cache in sync (route screen,
-      // schedule list, FAB gating) without blocking the snackbar.
-      unawaited(tasksNotifier.fetch());
-      messenger.showSnackBar(
-        SnackBar(
-          content: const Text('Task updated successfully'),
-          backgroundColor: const Color(0xFF1B5E4F),
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-      );
-    });
+    // Order matters: pop the sheet FIRST so its sub-tree (Form, TextFields,
+    // Scrollable, etc.) starts unmounting before the parent detail screen
+    // invalidates and rebuilds. Doing both in the same frame can leave an
+    // InheritedElement with active dependents and trip `_dependents.isEmpty`.
+    navigator.pop();
+    onSuccess();
+    // Fire-and-forget: keep the global tasks cache in sync (route screen,
+    // schedule list, FAB gating) without blocking the snackbar.
+    unawaited(tasksNotifier.fetch());
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text('Task updated successfully'),
+        backgroundColor: const Color(0xFF1B5E4F),
+        behavior: SnackBarBehavior.floating,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   /// Shows a confirmation dialog listing the task(s) that will be moved to
@@ -510,7 +448,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
             ),
             actions: [
               TextButton(
-                onPressed: () => ctx.pop(),
+                onPressed: () => Navigator.of(ctx).pop(),
                 child: const Text(
                   'Cancel',
                   style: TextStyle(color: Color(0xFF6B7280)),
@@ -522,7 +460,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
                     setDialogState(() => showError = true);
                     return;
                   }
-                  ctx.pop(reasonCtrl.text.trim());
+                  Navigator.of(ctx).pop(reasonCtrl.text.trim());
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1B5E4F),
@@ -539,14 +477,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
       ),
     );
 
-    // Defer disposal until after the dialog's exit transition completes.
-    // `showDialog`'s future resolves the moment `Navigator.pop()` is called,
-    // but the AlertDialog (and its TextField) keep rebuilding through the
-    // fade-out animation (~150ms). Disposing `reasonCtrl` synchronously here
-    // kills the controller mid-animation → "A TextEditingController was used
-    // after being disposed" + a corrupted tree that surfaces as the
-    // duplicate-GlobalKey / `_dependents.isEmpty` assertions.
-    Future<void>.delayed(const Duration(milliseconds: 300), reasonCtrl.dispose);
+    reasonCtrl.dispose();
     return result;
   }
 
@@ -726,7 +657,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
                             child: OutlinedButton(
                               onPressed: isLoading
                                   ? null
-                                  : () => context.pop(),
+                                  : () => Navigator.of(context).pop(),
                               style: OutlinedButton.styleFrom(
                                 side: const BorderSide(
                                     color: Color(0xFFE5E7EB)),
@@ -1412,33 +1343,6 @@ class _DetailBody extends StatelessWidget {
             ),
           ),
 
-          // ── Visit history (geofence) ─────────────────────────────────────
-          if (task.geofenceVisits.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _SectionHeader(
-              label: 'Visit History',
-              icon: Icons.pin_drop_outlined,
-            ),
-            _Card(
-              child: Column(
-                children: task.geofenceVisits.asMap().entries.map((entry) {
-                  final isLast =
-                      entry.key == task.geofenceVisits.length - 1;
-                  return Column(
-                    children: [
-                      _VisitRow(visit: entry.value),
-                      if (!isLast) ...[
-                        const SizedBox(height: 12),
-                        const Divider(height: 1, color: Color(0xFFF3F4F6)),
-                        const SizedBox(height: 12),
-                      ],
-                    ],
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-
           const SizedBox(height: 24),
         ],
       ),
@@ -1677,126 +1581,6 @@ class _PersonRow extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ],
-    );
-  }
-}
-
-class _VisitRow extends StatelessWidget {
-  final TaskGeofenceVisit visit;
-
-  const _VisitRow({required this.visit});
-
-  String _durationLabel(int seconds) {
-    if (seconds < 60) return '${seconds}s';
-    final mins = (seconds / 60).round();
-    if (mins < 60) return '$mins min';
-    final h = mins ~/ 60;
-    final m = mins % 60;
-    return m == 0 ? '${h}h' : '${h}h ${m}m';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final enter = visit.enteredAt.toLocal();
-    final exit = visit.exitedAt.toLocal();
-    final sameDay = enter.year == exit.year &&
-        enter.month == exit.month &&
-        enter.day == exit.day;
-    final dateLabel = DateFormat('d MMM yyyy').format(enter);
-    final enterTime = DateFormat('hh:mm a').format(enter);
-    final exitTime = sameDay
-        ? DateFormat('hh:mm a').format(exit)
-        : DateFormat('d MMM, hh:mm a').format(exit);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 38,
-          height: 38,
-          decoration: const BoxDecoration(
-            color: Color(0xFFECFDF5),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.place_outlined,
-            size: 18,
-            color: Color(0xFF1B5E4F),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    dateLabel,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF111827),
-                    ),
-                  ),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      _durationLabel(visit.stayDurationSeconds),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF166534),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '$enterTime → $exitTime',
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: Color(0xFF6B7280),
-                ),
-              ),
-              if (visit.exitEstimated) ...[
-                const SizedBox(height: 6),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.info_outline,
-                          size: 12, color: Color(0xFFB45309)),
-                      SizedBox(width: 4),
-                      Text(
-                        'Exit ~approx',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFFB45309),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
         ),
       ],
     );

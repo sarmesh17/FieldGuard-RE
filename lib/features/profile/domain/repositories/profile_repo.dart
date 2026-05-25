@@ -6,6 +6,6 @@ abstract class ProfileRepo {
   Future<Result<ProfileResponse>> updateProfile({
     String? fullName,
     String? email,
-    String? imageKey,
+    String? imagePath,
   });
 }

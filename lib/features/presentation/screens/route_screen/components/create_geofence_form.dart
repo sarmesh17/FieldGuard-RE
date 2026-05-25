@@ -1,9 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:field_guard_re/features/shops/data/models/create_shop_request.dart';
 import 'package:field_guard_re/features/shops/presentation/providers/shop_provider.dart';
@@ -66,6 +64,7 @@ class _CreateGeofenceFormState extends ConsumerState<CreateGeofenceForm> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
+    final panText = _panController.text.trim();
     final request = CreateShopRequest(
       name: _nameController.text.trim(),
       address: _addressController.text.trim(),
@@ -73,8 +72,7 @@ class _CreateGeofenceFormState extends ConsumerState<CreateGeofenceForm> {
       longitude: widget.longitude,
       contactName: _contactNameController.text.trim(),
       contactPhone: _contactPhoneController.text.trim(),
-      // PAN is now required and validated to exactly 9 digits above.
-      panNumber: _panController.text.trim(),
+      panNumber: panText.isEmpty ? null : panText,
       photoFile: _shopPhoto,
     );
 
@@ -82,7 +80,7 @@ class _CreateGeofenceFormState extends ConsumerState<CreateGeofenceForm> {
         await ref.read(shopNotifierProvider.notifier).createShop(request);
 
     if (success && mounted) {
-      context.pop(true);
+      Navigator.of(context).pop(true);
     }
   }
 
@@ -253,43 +251,28 @@ class _CreateGeofenceFormState extends ConsumerState<CreateGeofenceForm> {
                 _FormField(
                   controller: _contactPhoneController,
                   label: 'Contact Phone',
-                  hint: 'e.g. 9804208475',
+                  hint: 'e.g. 98042084753',
                   icon: Icons.phone_outlined,
                   keyboardType: TextInputType.phone,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(10),
-                  ],
                   validator: (v) {
-                    final t = v?.trim() ?? '';
-                    if (t.isEmpty) return 'Contact phone is required';
-                    if (!RegExp(r'^\d{10}$').hasMatch(t)) {
-                      return 'Phone number must be exactly 10 digits';
+                    if (v == null || v.trim().isEmpty) {
+                      return 'Contact phone is required';
+                    }
+                    if (v.trim().length < 7) {
+                      return 'Enter a valid phone number';
                     }
                     return null;
                   },
                 ),
                 const SizedBox(height: 16),
 
-                // PAN Number (required, 9 digits)
+                // PAN Number (Optional)
                 _FormField(
                   controller: _panController,
-                  label: 'PAN Number',
-                  hint: 'e.g. 123456789',
+                  label: 'PAN Number (Optional)',
+                  hint: 'e.g. ABCDE1234F',
                   icon: Icons.credit_card_outlined,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(9),
-                  ],
-                  validator: (v) {
-                    final t = v?.trim() ?? '';
-                    if (t.isEmpty) return 'PAN number is required';
-                    if (!RegExp(r'^\d{9}$').hasMatch(t)) {
-                      return 'PAN number must be exactly 9 digits';
-                    }
-                    return null;
-                  },
+                  validator: (_) => null,
                 ),
                 const SizedBox(height: 12),
 
@@ -369,7 +352,6 @@ class _FormField extends StatelessWidget {
   final IconData icon;
   final TextInputType keyboardType;
   final String? Function(String?) validator;
-  final List<TextInputFormatter>? inputFormatters;
 
   const _FormField({
     required this.controller,
@@ -378,7 +360,6 @@ class _FormField extends StatelessWidget {
     required this.icon,
     required this.validator,
     this.keyboardType = TextInputType.text,
-    this.inputFormatters,
   });
 
   @override
@@ -398,7 +379,6 @@ class _FormField extends StatelessWidget {
         TextFormField(
           controller: controller,
           keyboardType: keyboardType,
-          inputFormatters: inputFormatters,
           validator: validator,
           decoration: InputDecoration(
             hintText: hint,

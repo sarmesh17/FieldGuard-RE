@@ -525,9 +525,7 @@ class _ShopCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => context.push(AppRoutes.shopDetailPath(shop.id)),
-      child: Container(
+    return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -657,7 +655,6 @@ class _ShopCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
       ),
     );
   }

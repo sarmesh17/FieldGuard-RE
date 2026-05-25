@@ -27,59 +27,6 @@ class TaskShop {
       );
 }
 
-/// A single completed shop visit detected by the geofence tracker, as
-/// returned in the task detail response (`geofence_visits`, ascending by
-/// enter time). Lat/long are Decimal strings from the backend — parse before
-/// plotting.
-class TaskGeofenceVisit {
-  final String id;
-  final String visitId;
-  final int? shopId;
-  final DateTime enteredAt;
-  final DateTime exitedAt;
-  final int stayDurationSeconds;
-  final String enterLatitude;
-  final String enterLongitude;
-  final String exitLatitude;
-  final String exitLongitude;
-
-  /// True when the exit wasn't observed directly (app-kill / permission loss)
-  /// and was estimated from the last known in-geofence fix.
-  final bool exitEstimated;
-
-  const TaskGeofenceVisit({
-    required this.id,
-    required this.visitId,
-    this.shopId,
-    required this.enteredAt,
-    required this.exitedAt,
-    required this.stayDurationSeconds,
-    required this.enterLatitude,
-    required this.enterLongitude,
-    required this.exitLatitude,
-    required this.exitLongitude,
-    required this.exitEstimated,
-  });
-
-  factory TaskGeofenceVisit.fromJson(Map<String, dynamic> json) =>
-      TaskGeofenceVisit(
-        id: (json['id'] ?? '').toString(),
-        visitId: (json['visit_id'] ?? '').toString(),
-        shopId: json['shop_id'] as int?,
-        enteredAt:
-            DateTime.tryParse((json['entered_at'] ?? '') as String) ??
-                DateTime.now(),
-        exitedAt: DateTime.tryParse((json['exited_at'] ?? '') as String) ??
-            DateTime.now(),
-        stayDurationSeconds: (json['stay_duration_seconds'] as num?)?.toInt() ?? 0,
-        enterLatitude: (json['enter_latitude'] ?? '').toString(),
-        enterLongitude: (json['enter_longitude'] ?? '').toString(),
-        exitLatitude: (json['exit_latitude'] ?? '').toString(),
-        exitLongitude: (json['exit_longitude'] ?? '').toString(),
-        exitEstimated: json['exit_estimated'] as bool? ?? false,
-      );
-}
-
 class TaskModel {
   final int id;
   final String title;
@@ -100,7 +47,6 @@ class TaskModel {
   final TaskShop? shop;
   final String? cancelReason;
   final String? cancelImage;
-  final List<TaskGeofenceVisit> geofenceVisits;
 
   const TaskModel({
     required this.id,
@@ -122,7 +68,6 @@ class TaskModel {
     this.shop,
     this.cancelReason,
     this.cancelImage,
-    this.geofenceVisits = const [],
   });
 
   factory TaskModel.fromJson(Map<String, dynamic> json) {
@@ -163,10 +108,6 @@ class TaskModel {
           : null,
       cancelReason: json['cancel_reason'] as String?,
       cancelImage: json['cancel_image'] as String?,
-      geofenceVisits: (json['geofence_visits'] as List<dynamic>? ?? [])
-          .whereType<Map<String, dynamic>>()
-          .map(TaskGeofenceVisit.fromJson)
-          .toList(),
     );
   }
 }

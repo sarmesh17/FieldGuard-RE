@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_responsive.dart';
 import 'components/order_item.dart';
 import 'components/product_card.dart';
@@ -59,7 +58,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Color(0xFF157347)),
-          onPressed: () => context.pop(),
+          onPressed: () => Navigator.of(context).pop(),
         ),
         title: Column(
           children: [

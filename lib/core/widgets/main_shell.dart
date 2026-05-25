@@ -4,10 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
 import 'package:field_guard_re/features/geofence/presentation/providers/geofence_provider.dart';
 import 'package:field_guard_re/features/tasks/presentation/providers/tasks_provider.dart';
-import 'package:field_guard_re/features/tracking/presentation/providers/tracking_provider.dart';
 import 'bottom_nav_bar.dart';
 
-class MainShell extends ConsumerStatefulWidget {
+class MainShell extends ConsumerWidget {
   final Widget child;
 
   const MainShell({super.key, required this.child});
@@ -30,25 +29,7 @@ class MainShell extends ConsumerStatefulWidget {
   }
 
   @override
-  ConsumerState<MainShell> createState() => _MainShellState();
-}
-
-class _MainShellState extends ConsumerState<MainShell> {
-  @override
-  void initState() {
-    super.initState();
-    // Restore the user's last Live Tracking choice across process restarts.
-    // Deferred to the next frame so the providers we touch (and the
-    // platform channels they go through) are fully mounted. Best-effort —
-    // it silently no-ops if permissions are now missing.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      ref.read(trackingNotifierProvider.notifier).restore();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // Mount task-based live tracking sync once for the whole shell so the
     // socket auto-starts/stops based on active (IN_PROGRESS) tasks regardless
     // of which tab the user is currently on.
@@ -58,14 +39,10 @@ class _MainShellState extends ConsumerState<MainShell> {
     // shop (enter/stay/exit tracking) for the whole shell lifetime.
     ref.watch(geofenceVisitSyncProvider);
 
-    // Bridges geofence enter/exit into notifications + auto-complete-on-exit.
-    ref.watch(geofenceEventHandlerProvider);
-
     final location = GoRouterState.of(context).uri.path;
     return Scaffold(
-      body: widget.child,
-      bottomNavigationBar:
-          BottomNavBar(selectedIndex: MainShell._selectedIndex(location)),
+      body: child,
+      bottomNavigationBar: BottomNavBar(selectedIndex: _selectedIndex(location)),
     );
   }
 }

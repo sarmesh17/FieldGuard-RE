@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import 'package:field_guard_re/core/constants/api_constant.dart';
+import 'package:field_guard_re/core/services/geofence_visit_service.dart';
 import 'package:field_guard_re/core/services/token_storage.dart';
 
 /// Drives the real-time tracking flow over Socket.IO:
@@ -130,10 +131,10 @@ class LiveTrackingService {
             .listen(
       (pos) {
         _lastPosition = pos;
-        // NOTE: geofence detection no longer runs here. It runs in the
-        // background-service isolate (see BackgroundLocationService), so it
-        // survives the app being killed. This UI stream only feeds the live
-        // tracking socket.
+        // Single source of truth: every fix also drives shop-visit geofence
+        // detection. Fire-and-forget — the geofence service must never block
+        // or break the tracking stream.
+        GeofenceVisitService.instance.onPositionUpdate(pos);
       },
       onError: (_) {/* transient GPS errors — keep the session alive */},
     );
