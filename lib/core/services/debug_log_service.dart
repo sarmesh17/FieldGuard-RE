@@ -28,9 +28,15 @@ class DebugLogService {
 
   /// Resolves the log file path. Uses external storage on Android (so it's
   /// reachable via a file manager) and the documents dir elsewhere.
+  ///
+  /// Release builds skip file setup entirely: writing GPS coordinates to a
+  /// world-readable file in production would be a real privacy issue (and
+  /// pointless — there's no developer to read it). All later log()/share()
+  /// /read()/clear() calls become silent no-ops because `_file` stays null.
   Future<void> init() async {
     if (_initialised) return;
     _initialised = true;
+    if (kReleaseMode) return; // see doc comment above
     try {
       Directory dir;
       if (Platform.isAndroid) {

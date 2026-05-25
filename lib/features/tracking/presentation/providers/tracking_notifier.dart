@@ -105,11 +105,11 @@ class TrackingNotifier extends StateNotifier<TrackingState> {
       return 'Location permission is required for tracking.';
     }
 
-    // Background location must be requested after foreground on Android.
-    // Best-effort: tracking still works in foreground if this is denied.
-    if (!await Permission.locationAlways.isGranted) {
-      await Permission.locationAlways.request();
-    }
+    // NOTE: deliberately NOT requesting Permission.locationAlways
+    // (ACCESS_BACKGROUND_LOCATION). The manifest doesn't declare it (see the
+    // long comment in AndroidManifest.xml) — requesting it here would auto-
+    // deny and only confuse the user. Tracking runs inside a foreground
+    // service, which Android treats as foreground for permission purposes.
 
     // Android 13+ needs this for the foreground-service notification.
     if (!await Permission.notification.isGranted) {

@@ -3,14 +3,29 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!--
+      ACCESS_BACKGROUND_LOCATION intentionally NOT requested.
+
+      Play Store treats it as a most-scrutinised permission — requires a
+      Permission Declaration form, screen-recording video, and a 3–7 day
+      review. We don't need it: location streaming runs inside a
+      FOREGROUND_SERVICE_LOCATION foreground service (started while a task is
+      IN_PROGRESS), which Android treats as foreground for permission
+      purposes. The service's persistent notification keeps tracking alive
+      while the user is in WhatsApp/other apps; only a manual force-stop
+      ends it.
+
+      If you ever genuinely need post-force-stop wake-up (OS GeofencingClient
+      based on a registered geofence), re-add this permission and prepare the
+      Play declaration. Until then, leaving it out keeps store review easy.
+    -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
-        android:label="field_guard_re"
+        android:label="FieldGuard"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

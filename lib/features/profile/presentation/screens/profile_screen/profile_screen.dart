@@ -1,5 +1,6 @@
 import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -465,13 +466,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                 iconBg: const Color(0xFFFFF7ED),
                 onTap: () {},
               ),
-              _Item(
-                icon: Icons.bug_report_outlined,
-                label: 'Debug Logs',
-                iconColor: const Color(0xFFEA580C),
-                iconBg: const Color(0xFFFFF7ED),
-                onTap: () => _showDebugLogs(context),
-              ),
+              // Debug Logs viewer is a developer tool — hidden in release.
+              // DebugLogService itself is a no-op in release (see its init()),
+              // so this menu item would only show an empty box anyway.
+              if (kDebugMode)
+                _Item(
+                  icon: Icons.bug_report_outlined,
+                  label: 'Debug Logs',
+                  iconColor: const Color(0xFFEA580C),
+                  iconBg: const Color(0xFFFFF7ED),
+                  onTap: () => _showDebugLogs(context),
+                ),
             ],
           ),
         ),
