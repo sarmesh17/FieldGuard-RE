@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -21,7 +22,14 @@ void _log(String msg) {
 /// The last arm command the UI computed, so it can be re-sent to the service
 /// isolate the moment that isolate signals it's ready (its listeners are up).
 /// `null` means "disarm".
-({int taskId, int? shopId, double lat, double lng})? _lastArm;
+({
+  int taskId,
+  int? shopId,
+  double lat,
+  double lng,
+  String? title,
+  String? shopName,
+})? _lastArm;
 bool _bgReadyListenerWired = false;
 
 /// Sends the current desired arm/disarm to the background service isolate.
@@ -35,6 +43,8 @@ void _applyArm() {
       shopId: a.shopId,
       shopLat: a.lat,
       shopLng: a.lng,
+      taskTitle: a.title,
+      shopName: a.shopName,
     );
   }
 }
@@ -81,7 +91,14 @@ final geofenceVisitSyncProvider = Provider<void>((ref) {
   final lng = double.tryParse(task?.shopLongitude ?? '');
 
   _lastArm = (task != null && lat != null && lng != null)
-      ? (taskId: task.id, shopId: task.shop?.id, lat: lat, lng: lng)
+      ? (
+          taskId: task.id,
+          shopId: task.shop?.id,
+          lat: lat,
+          lng: lng,
+          title: task.title,
+          shopName: task.shop?.name,
+        )
       : null;
   _applyArm();
 });
@@ -122,6 +139,9 @@ final geofenceEventHandlerProvider = Provider<void>((ref) {
   Future<void> handleEnter(int taskId) async {
     _log('enter event for task=$taskId — reached marker set');
     ref.read(reachedDestinationTaskIdProvider.notifier).state = taskId;
+    // A solid buzz on arrival — the agent often has the phone in a pocket
+    // and won't be staring at the screen when they reach the shop.
+    HapticFeedback.heavyImpact();
     final title = taskById(taskId)?.shop?.name ?? 'your destination';
     await NotificationService.instance.show(
       id: _kGeofenceNotifId,

@@ -66,18 +66,24 @@ class BackgroundLocationService {
   static void stop() => FlutterBackgroundService().invoke('stopService');
 
   /// Tells the service isolate which task's shop geofence to watch. The UI
-  /// knows the active task; detection itself runs in the isolate.
+  /// knows the active task; detection itself runs in the isolate. [taskTitle]
+  /// (and optional [shopName]) are used only to make the persistent
+  /// foreground-service notification show what's being tracked.
   static void arm({
     required int taskId,
     int? shopId,
     required double shopLat,
     required double shopLng,
+    String? taskTitle,
+    String? shopName,
   }) =>
       FlutterBackgroundService().invoke('arm', {
         'taskId': taskId,
         'shopId': shopId,
         'shopLat': shopLat,
         'shopLng': shopLng,
+        'taskTitle': taskTitle,
+        'shopName': shopName,
       });
 
   /// Tells the service isolate to stop watching (no active task).
@@ -151,8 +157,28 @@ void _onStart(ServiceInstance service) async {
       shopLat: shopLat,
       shopLng: shopLng,
     );
+    // Reflect what's being tracked in the persistent notification.
+    if (service is AndroidServiceInstance) {
+      final taskTitle = data['taskTitle'] as String?;
+      final shopName = data['shopName'] as String?;
+      final dest = (shopName != null && shopName.isNotEmpty)
+          ? shopName
+          : (taskTitle ?? 'your task');
+      service.setForegroundNotificationInfo(
+        title: 'FieldGuard — tracking',
+        content: 'Heading to $dest.',
+      );
+    }
   });
-  service.on('disarm').listen((_) => geofence.disarm());
+  service.on('disarm').listen((_) {
+    geofence.disarm();
+    if (service is AndroidServiceInstance) {
+      service.setForegroundNotificationInfo(
+        title: 'FieldGuard',
+        content: 'Location tracking is on.',
+      );
+    }
+  });
 
   // Listeners are now registered. Tell the UI we're ready so it can (re)send
   // the current arm state — `invoke` is fire-and-forget with no buffering, so

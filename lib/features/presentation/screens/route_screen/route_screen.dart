@@ -733,7 +733,9 @@ class _ActiveNavCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            if (!reached)
+            if (reached)
+              const _ArrivedPill()
+            else
               _EtaPill(
                 route: route,
                 fetching: routeFetching,
@@ -856,6 +858,45 @@ class _ActiveNavCard extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Replaces the ETA pill once the agent has arrived — a clear green
+/// "Arrived" chip so the card reads as a completed leg, not a stalled ETA.
+class _ArrivedPill extends StatelessWidget {
+  const _ArrivedPill();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: AppResponsive.r(context, 10),
+        vertical: AppResponsive.r(context, 6),
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFF157347),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.check_circle,
+            size: AppResponsive.r(context, 16),
+            color: Colors.white,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'Arrived',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: AppResponsive.sp(context, 12),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
