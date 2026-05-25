@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'package:field_guard_re/core/services/background_location_service.dart';
 import 'package:field_guard_re/core/services/debug_log_service.dart';
@@ -127,6 +130,33 @@ final geofenceEventHandlerProvider = Provider<void>((ref) {
     );
   }
 
+  /// Attempts the auto-complete PATCH. Returns true on success. On failure
+  /// the task id is added to the persistent pending set so it can be retried
+  /// later (when the next visit upload succeeds, or on next app launch).
+  Future<bool> tryComplete(int taskId) async {
+    final result = await ref.read(taskDataSourceProvider).updateTask(
+          taskId,
+          const UpdateTaskRequest(
+            status: 'COMPLETED',
+            remarks: 'Auto-completed on geofence exit',
+          ),
+        );
+    switch (result) {
+      case Success():
+        _log('auto-complete PATCH ok for task=$taskId — refreshing list');
+        await _removePending(taskId);
+        // Refresh so activeInProgressTaskProvider recomputes → geofence
+        // disarms, tracking 'task' reason releases, route card clears.
+        await ref.read(tasksNotifierProvider.notifier).fetch();
+        return true;
+      case Failure(:final exception):
+        _log('auto-complete PATCH FAILED for task=$taskId: $exception — '
+            'queued for retry');
+        await _addPending(taskId);
+        return false;
+    }
+  }
+
   Future<void> handleExit(int taskId) async {
     _log('exit event for task=$taskId '
         '(reached=${ref.read(reachedDestinationTaskIdProvider)})');
@@ -144,25 +174,28 @@ final geofenceEventHandlerProvider = Provider<void>((ref) {
       body: 'You left $shopName — the task was marked completed.',
     );
 
-    // Auto-complete directly via the data source (not the autoDispose update
-    // notifier — nothing is watching it here, so it could dispose mid-await).
-    final result = await ref.read(taskDataSourceProvider).updateTask(
-          taskId,
-          const UpdateTaskRequest(
-            status: 'COMPLETED',
-            remarks: 'Auto-completed on geofence exit',
-          ),
-        );
-    switch (result) {
-      case Success():
-        _log('auto-complete PATCH ok for task=$taskId — refreshing list');
-        // Refresh so activeInProgressTaskProvider recomputes → geofence
-        // disarms, tracking 'task' reason releases, route card clears.
-        await ref.read(tasksNotifierProvider.notifier).fetch();
-      case Failure(:final exception):
-        _log('auto-complete PATCH FAILED for task=$taskId: $exception');
-        // Re-arm the reached marker so a later retry/exit can complete it.
-        ref.read(reachedDestinationTaskIdProvider.notifier).state = taskId;
+    await tryComplete(taskId);
+  }
+
+  /// Connectivity-recovery hook: a queued visit just uploaded, so the network
+  /// is reachable for this task right now. If we have a deferred auto-complete
+  /// for the same task, retry it.
+  Future<void> handleUploaded(int taskId) async {
+    final pending = await _readPending();
+    if (!pending.contains(taskId)) return;
+    _log('visit uploaded for task=$taskId — retrying deferred auto-complete');
+    await tryComplete(taskId);
+  }
+
+  // One-shot reconcile on startup: any auto-completes deferred by a previous
+  // run get a fresh attempt as soon as this provider mounts (UI is alive and
+  // probably online). Failures just stay queued.
+  Future<void> reconcilePending() async {
+    final pending = await _readPending();
+    if (pending.isEmpty) return;
+    _log('reconcile: ${pending.length} pending auto-complete(s)');
+    for (final id in pending) {
+      await tryComplete(id);
     }
   }
 
@@ -171,14 +204,69 @@ final geofenceEventHandlerProvider = Provider<void>((ref) {
     final type = event['type'] as String?;
     final taskId = (event['taskId'] as num?)?.toInt();
     if (taskId == null) return;
-    if (type == 'enter') {
-      handleEnter(taskId);
-    } else if (type == 'exit') {
-      handleExit(taskId);
+    switch (type) {
+      case 'enter':
+        handleEnter(taskId);
+      case 'exit':
+        handleExit(taskId);
+      case 'uploaded':
+        handleUploaded(taskId);
     }
   });
+
+  // Fire-and-forget startup reconcile.
+  reconcilePending();
 
   ref.onDispose(sub.cancel);
 });
 
 const _kGeofenceNotifId = 7001;
+
+// ── Pending auto-complete (offline retry) ───────────────────────────────────
+//
+// When the agent exits the geofence offline, the visit itself is queued by
+// GeofenceVisitService and retried until it uploads — but the auto-complete
+// PATCH used to be a single shot: one network failure and the task stayed
+// IN_PROGRESS forever. We persist the task ids whose PATCH failed and retry
+// them on two triggers:
+//   1. on app launch (one-shot reconcile)
+//   2. when a visit for that task finally uploads (visitUploaded event from
+//      the bg-service isolate) — that's a reliable "network is back" signal.
+
+const _kPendingKey = 'pending_auto_complete_task_ids';
+const _kPendingStorage = FlutterSecureStorage(
+  aOptions: AndroidOptions(encryptedSharedPreferences: true),
+);
+
+Future<Set<int>> _readPending() async {
+  final raw = await _kPendingStorage.read(key: _kPendingKey);
+  if (raw == null || raw.isEmpty) return <int>{};
+  try {
+    final list = jsonDecode(raw) as List;
+    return list.map((e) => (e as num).toInt()).toSet();
+  } catch (_) {
+    return <int>{};
+  }
+}
+
+Future<void> _writePending(Set<int> ids) async {
+  if (ids.isEmpty) {
+    await _kPendingStorage.delete(key: _kPendingKey);
+    return;
+  }
+  await _kPendingStorage.write(
+    key: _kPendingKey,
+    value: jsonEncode(ids.toList()),
+  );
+}
+
+Future<void> _addPending(int taskId) async {
+  final ids = await _readPending();
+  ids.add(taskId);
+  await _writePending(ids);
+}
+
+Future<void> _removePending(int taskId) async {
+  final ids = await _readPending();
+  if (ids.remove(taskId)) await _writePending(ids);
+}

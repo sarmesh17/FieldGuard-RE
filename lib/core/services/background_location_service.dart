@@ -135,6 +135,8 @@ void _onStart(ServiceInstance service) async {
       service.invoke('geofence-event', {'type': 'enter', 'taskId': taskId});
   geofence.onRealExit = (taskId) =>
       service.invoke('geofence-event', {'type': 'exit', 'taskId': taskId});
+  geofence.onVisitUploaded = (taskId) =>
+      service.invoke('geofence-event', {'type': 'uploaded', 'taskId': taskId});
 
   // The UI tells us which task's shop to watch (it knows the active task).
   service.on('arm').listen((data) {

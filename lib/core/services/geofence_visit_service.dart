@@ -127,6 +127,12 @@ class GeofenceVisitService {
   /// closed. This is the signal used to auto-complete the task.
   void Function(int taskId)? onRealExit;
 
+  /// Fired when a queued visit is successfully uploaded to the backend (i.e.
+  /// the network round-trip just succeeded). The app uses this as a
+  /// "connectivity is back for this task" trigger to retry any auto-complete
+  /// PATCH that failed earlier while offline.
+  void Function(int taskId)? onVisitUploaded;
+
   // ── Live detection state ────────────────────────────────────────────────
   _GeofenceState _state = _GeofenceState.disarmed;
   int? _armedTaskId;
@@ -556,6 +562,14 @@ class GeofenceVisitService {
 
         final result = await _dataSource.submit(visit); // network — no lock
         _log('upload result=$result for id=${visit.visitId}');
+
+        if (result == SubmitResult.success) {
+          // Network just succeeded for this task — signal listeners so they
+          // can retry any auto-complete PATCH that failed earlier offline.
+          final taskId = visit.taskId;
+          final cb = onVisitUploaded;
+          if (cb != null) scheduleMicrotask(() => cb(taskId));
+        }
 
         final transient = await _mutex.run<bool>(() async {
           final queue = await _readQueue();
