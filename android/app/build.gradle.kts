@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -5,12 +8,25 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Release signing — read android/key.properties if present. The file is
+// gitignored (see key.properties.template for what to put in it). Without it,
+// release builds fall back to the debug signing config so local
+// `flutter run` / debug APKs keep working; but a Play Store upload requires
+// the properties file with a real release keystore.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("key.properties")
+    if (file.exists()) load(FileInputStream(file))
+}
+val hasReleaseKeystore = keystoreProperties.getProperty("storeFile")?.isNotBlank() == true
+
 android {
     namespace = "com.example.field_guard_re"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // Required by flutter_local_notifications (uses java.time APIs).
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -30,15 +46,37 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Use the release keystore if key.properties is configured;
+            // otherwise fall back to debug signing so local builds work.
+            // Play Store requires the release keystore — see
+            // android/key.properties.template.
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Backport of java.time used by flutter_local_notifications.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

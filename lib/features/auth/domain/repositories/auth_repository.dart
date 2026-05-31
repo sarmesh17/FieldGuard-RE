@@ -5,5 +5,7 @@ abstract class AuthRepository {
   Future<Result<LoginResponse>> login({
     required String phone,
     required String password,
+    required bool termsAccepted,
+    required String termsVersion,
   });
 }

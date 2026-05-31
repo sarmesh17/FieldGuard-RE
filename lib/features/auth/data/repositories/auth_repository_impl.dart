@@ -14,9 +14,16 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<Result<LoginResponse>> login({
     required String phone,
     required String password,
+    required bool termsAccepted,
+    required String termsVersion,
   }) async {
     final result = await _dataSource.login(
-      LoginRequest(phone: phone, password: password),
+      LoginRequest(
+        phone: phone,
+        password: password,
+        termsAccepted: termsAccepted,
+        termsVersion: termsVersion,
+      ),
     );
     if (result is Success<LoginResponse>) {
       await TokenStorage.saveTokens(

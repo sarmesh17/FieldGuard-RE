@@ -1,0 +1,19 @@
+# Copy this file to `android/key.properties` and fill in your release
+# signing details. DO NOT commit `key.properties` or the .jks file —
+# both are already in .gitignore.
+#
+# Generate a keystore (one-time, keep the .jks file backed up FOREVER —
+# if you lose it you can never update this app on Play):
+#
+#   keytool -genkey -v -keystore ~/fieldguard-release.jks \
+#       -keyalg RSA -keysize 2048 -validity 10000 -alias fieldguard
+#
+# Then point `storeFile` at the .jks path (absolute, or relative to
+# android/app/) and fill the rest. `app/build.gradle.kts` reads this file
+# and uses it for the `release` build type; if it's missing, release falls
+# back to the debug signing config so local debug builds keep working.
+
+storePassword=
+keyPassword=
+keyAlias=fieldguard
+storeFile=

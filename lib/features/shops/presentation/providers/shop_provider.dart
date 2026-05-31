@@ -1,11 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:field_guard_re/core/services/upload_service.dart';
+import 'package:field_guard_re/core/utils/result.dart';
 import 'package:field_guard_re/features/auth/presentation/providers/auth_provider.dart';
 import 'package:field_guard_re/features/shops/data/datasources/shop_datasource.dart';
 import 'package:field_guard_re/features/shops/data/datasources/shop_datasource_impl.dart';
+import 'package:field_guard_re/features/shops/data/models/shop_detail.dart';
 import 'package:field_guard_re/features/shops/data/repositories/shop_repository_impl.dart';
 import 'package:field_guard_re/features/shops/domain/repositories/shop_repository.dart';
 import 'package:field_guard_re/features/shops/domain/usecases/create_shop_usecase.dart';
+import 'package:field_guard_re/features/shops/domain/usecases/get_shop_detail_usecase.dart';
 import 'package:field_guard_re/features/shops/domain/usecases/get_shops_usecase.dart';
 import 'shop_notifier.dart';
 import 'shop_state.dart';
@@ -32,6 +35,21 @@ final createShopUseCaseProvider = Provider<CreateShopUseCase>(
 final getShopsUseCaseProvider = Provider<GetShopsUseCase>(
   (ref) => GetShopsUseCase(ref.watch(shopRepositoryProvider)),
 );
+
+final getShopDetailUseCaseProvider = Provider<GetShopDetailUseCase>(
+  (ref) => GetShopDetailUseCase(ref.watch(shopRepositoryProvider)),
+);
+
+/// Fetches full details for a single shop. Keyed by shop id so multiple
+/// detail screens can coexist; auto-disposes when no longer watched.
+final shopDetailProvider =
+    FutureProvider.autoDispose.family<ShopDetail, int>((ref, id) async {
+  final result = await ref.watch(getShopDetailUseCaseProvider).call(id);
+  return switch (result) {
+    Success(:final data) => data,
+    Failure(:final exception) => throw exception,
+  };
+});
 
 final uploadServiceProvider = Provider<UploadService>(
   (ref) => UploadService(ref.watch(dioProvider)),

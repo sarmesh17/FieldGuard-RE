@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
 import 'package:permission_handler/permission_handler.dart';
@@ -11,10 +11,8 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/services/mapbox_directions_service.dart';
 import '../../../tasks/data/models/task_model.dart';
 import '../../../tasks/presentation/providers/tasks_provider.dart';
-import 'components/create_geofence_form.dart';
+import '../../../tracking/presentation/providers/tracking_provider.dart';
 import 'components/task_nav_overlay_controller.dart';
-
-const _geofenceRadiusFullscreen = 50.0; // metres
 
 class MapFullscreenScreen extends ConsumerStatefulWidget {
   final double? initialLat;
@@ -32,13 +30,8 @@ class _MapFullscreenScreenState extends ConsumerState<MapFullscreenScreen> {
   bool _isLocating = false;
   geo.Position? _lastPosition;
 
-  // Geofence state
-  Position? _geofenceCenter;
-  bool _geofenceActive = false;
-  bool _isInsideGeofence = false;
+  // Position stream — feeds the task navigation overlay's re-route trigger.
   StreamSubscription<geo.Position>? _positionStream;
-  PolygonAnnotationManager? _polygonManager;
-  PolygonAnnotation? _geofencePolygon;
 
   // Task navigation overlay (shared with the embedded route screen).
   TaskNavOverlayController? _navOverlay;
@@ -70,17 +63,6 @@ class _MapFullscreenScreenState extends ConsumerState<MapFullscreenScreen> {
     final status = await Permission.locationWhenInUse.request();
     if (!status.isGranted) return;
 
-    await _mapboxMap?.location.updateSettings(
-      LocationComponentSettings(
-        enabled: true,
-        pulsingEnabled: true,
-        // Render the directional puck (Google-Maps-style heading cone) so the
-        // user can see which way they're facing, not just where they are.
-        puckBearingEnabled: true,
-        puckBearing: PuckBearing.HEADING,
-      ),
-    );
-
     // Bootstrap the shared nav overlay so the destination pin + polyline
     // can be drawn the same way as on the embedded map.
     final overlay = TaskNavOverlayController(
@@ -96,6 +78,20 @@ class _MapFullscreenScreenState extends ConsumerState<MapFullscreenScreen> {
     await overlay.init();
     if (!mounted) return;
     _navOverlay = overlay;
+
+    // Enable the puck AFTER the overlay's managers exist, anchoring it above
+    // the route polyline's layer so the green line renders beneath the dot.
+    await _mapboxMap?.location.updateSettings(
+      LocationComponentSettings(
+        enabled: true,
+        pulsingEnabled: true,
+        // Render the directional puck (Google-Maps-style heading cone) so the
+        // user can see which way they're facing, not just where they are.
+        puckBearingEnabled: true,
+        puckBearing: PuckBearing.HEADING,
+        layerAbove: overlay.routeLayerId,
+      ),
+    );
 
     final lat = widget.initialLat;
     final lng = widget.initialLng;
@@ -185,86 +181,8 @@ class _MapFullscreenScreenState extends ConsumerState<MapFullscreenScreen> {
     await _autoGoToLocation();
   }
 
-  // ── Geofence ──────────────────────────────────────────────────────────────
-
-  Future<void> _setGeofence() async {
-    final status = await Permission.locationWhenInUse.status;
-    if (!status.isGranted) return;
-
-    final pos = await geo.Geolocator.getCurrentPosition(
-      locationSettings: const geo.LocationSettings(
-        accuracy: geo.LocationAccuracy.high,
-      ),
-    );
-
-    if (!mounted) return;
-
-    final confirmed = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => CreateGeofenceForm(
-        latitude: pos.latitude,
-        longitude: pos.longitude,
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    final center = Position(pos.longitude, pos.latitude);
-    await _drawGeofenceCircle(center);
-    await _mapboxMap?.flyTo(
-      CameraOptions(
-        center: Point(coordinates: center),
-        zoom: 17.0,
-      ),
-      MapAnimationOptions(duration: 1000),
-    );
-
-    setState(() {
-      _geofenceCenter = center;
-      _geofenceActive = true;
-      _isInsideGeofence = true;
-    });
-    // Position stream is already running (started in `_initMap`); the
-    // listener picks up the new geofence center automatically.
-  }
-
-  Future<void> _clearGeofence() async {
-    if (_polygonManager != null && _geofencePolygon != null) {
-      await _polygonManager!.delete(_geofencePolygon!);
-      _geofencePolygon = null;
-    }
-
-    setState(() {
-      _geofenceCenter = null;
-      _geofenceActive = false;
-      _isInsideGeofence = false;
-    });
-  }
-
-  Future<void> _drawGeofenceCircle(Position center) async {
-    if (_polygonManager != null && _geofencePolygon != null) {
-      await _polygonManager!.delete(_geofencePolygon!);
-    }
-    _polygonManager ??=
-        await _mapboxMap!.annotations.createPolygonAnnotationManager();
-
-    _geofencePolygon = await _polygonManager!.create(
-      PolygonAnnotationOptions(
-        geometry: Polygon(
-          coordinates: [_circlePoints(center, _geofenceRadiusFullscreen)],
-        ),
-        fillColor: const Color(0xFF157347).toARGB32(),
-        fillOpacity: 0.15,
-        fillOutlineColor: const Color(0xFF157347).toARGB32(),
-      ),
-    );
-  }
-
-  /// Single always-on stream while the screen is mounted. Drives both the
-  /// geofence inside/outside check AND the task navigation re-route
-  /// trigger so the green polyline tracks the user as they move.
+  /// Always-on stream while the screen is mounted — drives the task
+  /// navigation re-route trigger so the green polyline tracks the user.
   void _startPositionStream() {
     _positionStream?.cancel();
     _positionStream = geo.Geolocator.getPositionStream(
@@ -280,68 +198,6 @@ class _MapFullscreenScreenState extends ConsumerState<MapFullscreenScreen> {
   void _onPositionUpdate(geo.Position current) {
     _lastPosition = current;
     _navOverlay?.onPositionUpdate(current);
-
-    if (_geofenceCenter == null) return;
-
-    final distance = geo.Geolocator.distanceBetween(
-      current.latitude,
-      current.longitude,
-      _geofenceCenter!.lat.toDouble(),
-      _geofenceCenter!.lng.toDouble(),
-    );
-
-    final nowInside = distance <= _geofenceRadiusFullscreen;
-
-    if (nowInside && !_isInsideGeofence) {
-      setState(() => _isInsideGeofence = true);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(children: [
-              Icon(Icons.location_on, color: Colors.white),
-              SizedBox(width: 8),
-              Text('You entered the geofence area!',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
-            ]),
-            backgroundColor: Color(0xFF157347),
-            duration: Duration(seconds: 4),
-          ),
-        );
-      }
-    } else if (!nowInside && _isInsideGeofence) {
-      setState(() => _isInsideGeofence = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(children: [
-              Icon(Icons.location_off, color: Colors.white),
-              SizedBox(width: 8),
-              Text('You left the geofence area.',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
-            ]),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 4),
-          ),
-        );
-      }
-    }
-  }
-
-  List<Position> _circlePoints(Position center, double radiusMeters) {
-    const earthRadius = 6371000.0;
-    final lat = center.lat.toDouble() * math.pi / 180;
-    final lng = center.lng.toDouble() * math.pi / 180;
-    final d = radiusMeters / earthRadius;
-    const n = 64;
-    return List.generate(n + 1, (i) {
-      final bearing = (2 * math.pi * i) / n;
-      final pLat = math.asin(math.sin(lat) * math.cos(d) +
-          math.cos(lat) * math.sin(d) * math.cos(bearing));
-      final pLng = lng +
-          math.atan2(math.sin(bearing) * math.sin(d) * math.cos(lat),
-              math.cos(d) - math.sin(lat) * math.sin(pLat));
-      return Position(pLng * 180 / math.pi, pLat * 180 / math.pi);
-    });
   }
 
   // ── UI ────────────────────────────────────────────────────────────────────
@@ -355,6 +211,18 @@ class _MapFullscreenScreenState extends ConsumerState<MapFullscreenScreen> {
       if (prev?.id == next?.id) return;
       _navOverlay?.setTask(next, currentPos: _lastPosition);
     });
+
+    // If Live Tracking is turned off while the fullscreen map is open, this
+    // screen has nothing meaningful to show (no puck, no route). Pop back to
+    // the route screen, where the tracking-off overlay greets the user.
+    ref.listen<bool>(
+      trackingNotifierProvider.select((s) => s.isActive),
+      (prev, next) {
+        if (prev == true && next == false && context.mounted) {
+          context.pop();
+        }
+      },
+    );
 
     final activeTask = ref.watch(activeInProgressTaskProvider);
 
@@ -385,8 +253,7 @@ class _MapFullscreenScreenState extends ConsumerState<MapFullscreenScreen> {
           const Positioned(top: 48, left: 16, child: _BackButton()),
 
           // Active-task ETA banner — top centre. Only shown while a task
-          // is in progress; the geofence chip drops down a row in that
-          // case to avoid overlap.
+          // is in progress.
           if (activeTask != null)
             Positioned(
               top: 48,
@@ -398,29 +265,6 @@ class _MapFullscreenScreenState extends ConsumerState<MapFullscreenScreen> {
                 fetching: _activeRouteFetching,
               ),
             ),
-
-          // Geofence status chip — top centre (or just below the nav banner
-          // when navigating, so both can coexist).
-          if (_geofenceActive)
-            Positioned(
-              top: activeTask != null ? 110 : 52,
-              left: 0,
-              right: 0,
-              child: Center(child: _StatusChip(inside: _isInsideGeofence)),
-            ),
-
-          // Geofence toggle — bottom left
-          Positioned(
-            bottom: 48,
-            left: 16,
-            child: _MapIconButton(
-              icon: _geofenceActive ? Icons.fence : Icons.fence_outlined,
-              color: _geofenceActive
-                  ? const Color(0xFF157347)
-                  : const Color(0xFF6B7280),
-              onTap: _geofenceActive ? _clearGeofence : _setGeofence,
-            ),
-          ),
 
           // My location — bottom right
           Positioned(
@@ -446,7 +290,7 @@ class _BackButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return _MapIconButton(
       icon: Icons.arrow_back,
-      onTap: () => Navigator.of(context).pop(),
+      onTap: () => context.pop(),
     );
   }
 }
@@ -454,13 +298,8 @@ class _BackButton extends StatelessWidget {
 class _MapIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  final Color color;
 
-  const _MapIconButton({
-    required this.icon,
-    required this.onTap,
-    this.color = const Color(0xFF157347),
-  });
+  const _MapIconButton({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -480,7 +319,7 @@ class _MapIconButton extends StatelessWidget {
             ),
           ],
         ),
-        child: Icon(icon, color: color, size: 22),
+        child: Icon(icon, color: const Color(0xFF157347), size: 22),
       ),
     );
   }
@@ -561,44 +400,6 @@ class _NavBanner extends StatelessWidget {
                 color: Color(0xFF157347),
               ),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  final bool inside;
-  const _StatusChip({required this.inside});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: inside ? const Color(0xFF157347) : Colors.orange,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.circle, size: 8, color: Colors.white),
-          const SizedBox(width: 6),
-          Text(
-            inside ? 'Inside Geofence' : 'Outside Geofence',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
         ],
       ),
     );

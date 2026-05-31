@@ -1,9 +1,12 @@
 import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:field_guard_re/core/constants/api_constant.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
+import 'package:field_guard_re/core/services/debug_log_service.dart';
 import 'package:field_guard_re/core/services/geofence_visit_service.dart';
 import 'package:field_guard_re/core/services/token_storage.dart';
 import 'package:field_guard_re/core/theme/app_colors.dart';
@@ -34,8 +37,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
   late final Animation<Offset> _menu2Slide;
   late final Animation<double> _menu3Fade;
   late final Animation<Offset> _menu3Slide;
-  late final Animation<double> _menu4Fade;
-  late final Animation<Offset> _menu4Slide;
   late final Animation<double> _footerFade;
   late final Animation<Offset> _footerSlide;
 
@@ -84,12 +85,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
     );
     _menu3Slide = _slide(0.57, 0.80);
 
-    _menu4Fade = CurvedAnimation(
-      parent: _ctrl,
-      curve: const Interval(0.65, 0.87, curve: Curves.easeOut),
-    );
-    _menu4Slide = _slide(0.65, 0.87);
-
     _footerFade = CurvedAnimation(
       parent: _ctrl,
       curve: const Interval(0.78, 1.0, curve: Curves.easeOut),
@@ -119,8 +114,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
   }
 
   String _initials(String fullName) {
-    final parts =
-        fullName.trim().split(' ').where((p) => p.isNotEmpty).toList();
+    final parts = fullName
+        .trim()
+        .split(' ')
+        .where((p) => p.isNotEmpty)
+        .toList();
     if (parts.isEmpty) return '?';
     if (parts.length == 1) return parts[0][0].toUpperCase();
     return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
@@ -140,28 +138,25 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
       body: switch (profileState) {
         ProfileInitial() || ProfileLoading() => const _ProfileSkeleton(),
         ProfileError(:final message) => Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(message, style: const TextStyle(color: Colors.red)),
-                const SizedBox(height: 12),
-                ElevatedButton(
-                  onPressed: () => ref
-                      .read(profileNotifierProvider.notifier)
-                      .fetchProfile(),
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          ),
-        ProfileSuccess(:final response) => CustomScrollView(
-            slivers: [
-              _buildSliverHeader(context, response),
-              SliverToBoxAdapter(
-                child: _buildBody(context, response),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(message, style: const TextStyle(color: Colors.red)),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () =>
+                    ref.read(profileNotifierProvider.notifier).fetchProfile(),
+                child: const Text('Retry'),
               ),
             ],
           ),
+        ),
+        ProfileSuccess(:final response) => CustomScrollView(
+          slivers: [
+            _buildSliverHeader(context, response),
+            SliverToBoxAdapter(child: _buildBody(context, response)),
+          ],
+        ),
       },
     );
   }
@@ -169,8 +164,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
   // ── Header ────────────────────────────────────────────────────────────────
 
   Widget _buildSliverHeader(BuildContext context, ProfileResponse response) {
+    // In landscape the viewport height is small, so a width-scaled 240px header
+    // would swallow most of the screen and leave no room for the menu. Cap it
+    // to a fraction of the actual height there; portrait keeps the full hero.
+    // The header content now starts below the pinned toolbar (see the top
+    // inset in _buildHeaderBackground), so the expanded height must leave room
+    // for toolbar + avatar + name + role pill. Landscape caps it to a slice of
+    // the (short) viewport height; portrait keeps the full hero.
+    final landscape = AppResponsive.isLandscape(context);
+    final expandedHeight = landscape
+        ? (kToolbarHeight + AppResponsive.hp(context, 62)).clamp(210.0, 280.0)
+        : AppResponsive.r(context, 240);
+
     return SliverAppBar(
-      expandedHeight: AppResponsive.r(context, 240),
+      expandedHeight: expandedHeight,
       pinned: true,
       floating: false,
       automaticallyImplyLeading: false,
@@ -192,7 +199,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
   }
 
   Widget _buildHeaderBackground(
-      BuildContext context, ProfileResponse response) {
+    BuildContext context,
+    ProfileResponse response,
+  ) {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -205,30 +214,27 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
         fit: StackFit.expand,
         children: [
           // Decorative circles
-          Positioned(
-            top: -40,
-            right: -40,
-            child: _decorCircle(160, 0.06),
-          ),
-          Positioned(
-            bottom: 10,
-            left: -50,
-            child: _decorCircle(140, 0.04),
-          ),
-          Positioned(
-            top: 60,
-            right: 30,
-            child: _decorCircle(60, 0.07),
-          ),
-          // Profile content
+          Positioned(top: -40, right: -40, child: _decorCircle(160, 0.06)),
+          Positioned(bottom: 10, left: -50, child: _decorCircle(140, 0.04)),
+          Positioned(top: 60, right: 30, child: _decorCircle(60, 0.07)),
+          // Profile content. Top inset clears the pinned toolbar so the
+          // avatar never collides with the "Profile" title — critical in
+          // landscape where the collapsed header is short and the two would
+          // otherwise overlap.
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 40, 16, 16),
+              padding: EdgeInsets.fromLTRB(
+                AppResponsive.r(context, 16),
+                kToolbarHeight + AppResponsive.vGap(context, 8),
+                AppResponsive.r(context, 16),
+                AppResponsive.vGap(context, 12),
+              ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const SizedBox(height: 8),
+                  SizedBox(height: AppResponsive.vGap(context, 8)),
                   // Avatar with glowing ring
                   ScaleTransition(
                     scale: _avatarScale,
@@ -248,22 +254,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                           ),
                         ],
                       ),
-                      child: CircleAvatar(
+                      child: _ProfileAvatar(
+                        imageUrl: response.profileImage,
+                        initials: _initials(response.fullName),
                         radius: AppResponsive.r(context, 40),
-                        backgroundColor:
-                            Colors.white.withValues(alpha: 0.18),
-                        child: Text(
-                          _initials(response.fullName),
-                          style: AppTextStyles.heading1R(context).copyWith(
-                            fontSize: AppResponsive.sp(context, 28),
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.cardWhite,
-                          ),
-                        ),
+                        fontSize: AppResponsive.sp(context, 28),
                       ),
                     ),
                   ),
-                  SizedBox(height: AppResponsive.r(context, 10)),
+                  SizedBox(height: AppResponsive.vGap(context, 10)),
                   // Name
                   FadeTransition(
                     opacity: _headerFade,
@@ -276,13 +275,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                       ),
                     ),
                   ),
-                  SizedBox(height: AppResponsive.r(context, 6)),
+                  SizedBox(height: AppResponsive.vGap(context, 6)),
                   // Role pill
                   FadeTransition(
                     opacity: _headerFade,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 4),
+                        horizontal: 14,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(20),
@@ -311,13 +312,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
   }
 
   Widget _decorCircle(double size, double opacity) => Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.white.withValues(alpha: opacity),
-        ),
-      );
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: Colors.white.withValues(alpha: opacity),
+    ),
+  );
 
   // ── Body ──────────────────────────────────────────────────────────────────
 
@@ -326,40 +327,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
 
     return Column(
       children: [
-        // Stats
+        // Stats (current month)
         FadeTransition(
           opacity: _statsFade,
           child: SlideTransition(
             position: _statsSlide,
             child: Padding(
               padding: EdgeInsets.fromLTRB(hPad, 20, hPad, 0),
-              child: Row(
-                children: [
-                  _buildStatTile(
-                    context,
-                    icon: Icons.store_outlined,
-                    label: 'Visits',
-                    target: 142,
-                    format: (v) => v.toInt().toString(),
-                  ),
-                  const SizedBox(width: 10),
-                  _buildStatTile(
-                    context,
-                    icon: Icons.account_balance_wallet_outlined,
-                    label: 'Collected',
-                    target: 3.2,
-                    format: (v) => '₹ ${v.toStringAsFixed(1)}L',
-                  ),
-                  const SizedBox(width: 10),
-                  _buildStatTile(
-                    context,
-                    icon: Icons.check_circle_outline,
-                    label: 'Confirmation',
-                    target: 96,
-                    format: (v) => '${v.toInt()}%',
-                  ),
-                ],
-              ),
+              child: _buildStats(context),
             ),
           ),
         ),
@@ -382,13 +357,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                 iconBg: const Color(0xFFE4F4EE),
                 onTap: () => context.push(AppRoutes.personalDetails),
               ),
-              _Item(
-                icon: Icons.account_balance_outlined,
-                label: 'Bank Information',
-                iconColor: AppColors.primaryGreen,
-                iconBg: const Color(0xFFE4F4EE),
-                onTap: () {},
-              ),
             ],
           ),
         ),
@@ -409,70 +377,57 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                 iconBg: const Color(0xFFEFF6FF),
                 onTap: () => context.push(AppRoutes.showShops),
               ),
-              _Item(
-                icon: Icons.history,
-                label: 'Visit History',
-                iconColor: const Color(0xFF2563EB),
-                iconBg: const Color(0xFFEFF6FF),
-                onTap: () {},
-              ),
             ],
           ),
         ),
 
-        // APP SETTINGS
+        // LEGAL
         _animatedSection(
           fade: _menu3Fade,
           slide: _menu3Slide,
           child: _buildSection(
             context,
             hPad: hPad,
-            title: 'APP SETTINGS',
+            title: 'LEGAL',
             items: [
               _Item(
-                icon: Icons.notifications_outlined,
-                label: 'Notifications',
-                iconColor: const Color(0xFF7C3AED),
-                iconBg: const Color(0xFFF5F3FF),
-                onTap: () {},
+                icon: Icons.description_outlined,
+                label: 'Terms & Conditions',
+                iconColor: const Color(0xFF1B5E4F),
+                iconBg: const Color(0xFFECFDF5),
+                onTap: () => context.push(AppRoutes.termsAndConditions),
               ),
               _Item(
-                icon: Icons.lock_outline,
-                label: 'Security & Pin',
-                iconColor: const Color(0xFF7C3AED),
-                iconBg: const Color(0xFFF5F3FF),
-                onTap: () {},
+                icon: Icons.privacy_tip_outlined,
+                label: 'Privacy Policy',
+                iconColor: const Color(0xFF1B5E4F),
+                iconBg: const Color(0xFFECFDF5),
+                onTap: () => context.push(AppRoutes.privacyPolicy),
               ),
             ],
           ),
         ),
 
-        // SUPPORT
-        _animatedSection(
-          fade: _menu4Fade,
-          slide: _menu4Slide,
-          child: _buildSection(
-            context,
-            hPad: hPad,
-            title: 'SUPPORT',
-            items: [
-              _Item(
-                icon: Icons.help_outline,
-                label: 'Help Center',
-                iconColor: const Color(0xFFEA580C),
-                iconBg: const Color(0xFFFFF7ED),
-                onTap: () {},
-              ),
-              _Item(
-                icon: Icons.warning_amber_outlined,
-                label: 'Report an Issue',
-                iconColor: const Color(0xFFEA580C),
-                iconBg: const Color(0xFFFFF7ED),
-                onTap: () {},
-              ),
-            ],
+        // DEVELOPER — Debug Logs viewer is a developer tool, hidden in release.
+        if (kDebugMode)
+          _animatedSection(
+            fade: _footerFade,
+            slide: _footerSlide,
+            child: _buildSection(
+              context,
+              hPad: hPad,
+              title: 'DEVELOPER',
+              items: [
+                _Item(
+                  icon: Icons.bug_report_outlined,
+                  label: 'Debug Logs',
+                  iconColor: const Color(0xFFEA580C),
+                  iconBg: const Color(0xFFFFF7ED),
+                  onTap: () => _showDebugLogs(context),
+                ),
+              ],
+            ),
           ),
-        ),
 
         const SizedBox(height: 8),
 
@@ -508,19 +463,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                     ),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(
-                          color: Color(0xFFDC2626), width: 1.5),
+                        color: Color(0xFFDC2626),
+                        width: 1.5,
+                      ),
                       minimumSize: const Size(double.infinity, 52),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      backgroundColor:
-                          const Color(0xFFDC2626).withValues(alpha: 0.04),
+                      backgroundColor: const Color(
+                        0xFFDC2626,
+                      ).withValues(alpha: 0.04),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'FieldGuard Agent v2.4.1',
-                    style: AppTextStyles.versionR(context),
                   ),
                 ],
               ),
@@ -537,19 +490,78 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
     required Animation<double> fade,
     required Animation<Offset> slide,
     required Widget child,
-  }) =>
-      FadeTransition(
-        opacity: fade,
-        child: SlideTransition(position: slide, child: child),
-      );
+  }) => FadeTransition(
+    opacity: fade,
+    child: SlideTransition(position: slide, child: child),
+  );
 
-  // ── Stat tile ─────────────────────────────────────────────────────────────
+  // ── Stats (current month) ─────────────────────────────────────────────────
+
+  /// Three current-month tiles fed by [profileStatsProvider]. While loading or
+  /// on error (incl. a 403 for non-EMPLOYEE) the values fall back to '—' so the
+  /// layout never jumps and a missing endpoint never breaks the screen.
+  Widget _buildStats(BuildContext context) {
+    final statsAsync = ref.watch(profileStatsProvider);
+    final stats = statsAsync.valueOrNull;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            'THIS MONTH',
+            style: AppTextStyles.label.copyWith(
+              fontSize: AppResponsive.sp(context, 11),
+              fontWeight: FontWeight.w700,
+              color: AppColors.textGray,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ),
+        Row(
+          children: [
+            _buildStatTile(
+              context,
+              icon: Icons.store_outlined,
+              label: 'Visits',
+              target: stats?.visits.toDouble(),
+              format: (v) => v.toInt().toString(),
+            ),
+            const SizedBox(width: 10),
+            _buildStatTile(
+              context,
+              icon: Icons.account_balance_wallet_outlined,
+              label: 'Collected',
+              target: stats?.collected,
+              format: _formatCollected,
+            ),
+            const SizedBox(width: 10),
+            _buildStatTile(
+              context,
+              icon: Icons.task_alt_outlined,
+              label: 'Tasks Done',
+              target: stats?.tasksCompleted.toDouble(),
+              format: (v) => v.toInt().toString(),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// `320000` → `₹ 3.2L`, `45000` → `₹ 45.0K`, `800` → `₹ 800`.
+  static String _formatCollected(double v) {
+    if (v >= 100000) return '₹ ${(v / 100000).toStringAsFixed(1)}L';
+    if (v >= 1000) return '₹ ${(v / 1000).toStringAsFixed(1)}K';
+    return '₹ ${v.toStringAsFixed(0)}';
+  }
 
   Widget _buildStatTile(
     BuildContext context, {
     required IconData icon,
     required String label,
-    required double target,
+    required double? target,
     required String Function(double) format,
   }) {
     return Expanded(
@@ -585,18 +597,29 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
               ),
             ),
             SizedBox(height: AppResponsive.r(context, 8)),
-            AnimatedBuilder(
-              animation: _statsCount,
-              builder: (context, _) => Text(
-                format(_statsCount.value * target),
-                style: AppTextStyles.label.copyWith(
-                  fontSize: AppResponsive.sp(context, 15),
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textDark,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
+            // '—' until stats arrive; then count up to the real value.
+            target == null
+                ? Text(
+                    '—',
+                    style: AppTextStyles.label.copyWith(
+                      fontSize: AppResponsive.sp(context, 15),
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textDark,
+                    ),
+                    textAlign: TextAlign.center,
+                  )
+                : AnimatedBuilder(
+                    animation: _statsCount,
+                    builder: (context, _) => Text(
+                      format(_statsCount.value * target),
+                      style: AppTextStyles.label.copyWith(
+                        fontSize: AppResponsive.sp(context, 15),
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textDark,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
             const SizedBox(height: 2),
             Text(
               label,
@@ -613,6 +636,108 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
   }
 
   // ── Menu section ──────────────────────────────────────────────────────────
+
+  /// On-device debug log viewer — reads the persisted geofence trace so it can
+  /// be reviewed (and shared to a laptop) in the field without `flutter logs`.
+  void _showDebugLogs(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheetState) {
+            return DraggableScrollableSheet(
+              initialChildSize: 0.85,
+              maxChildSize: 0.95,
+              minChildSize: 0.5,
+              expand: false,
+              builder: (_, scrollCtrl) => Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.bug_report_outlined,
+                          color: Color(0xFFEA580C),
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Debug Logs',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Refresh',
+                          icon: const Icon(Icons.refresh),
+                          onPressed: () => setSheetState(() {}),
+                        ),
+                        IconButton(
+                          tooltip: 'Share',
+                          icon: const Icon(Icons.ios_share),
+                          onPressed: () => DebugLogService.instance.share(),
+                        ),
+                        IconButton(
+                          tooltip: 'Clear',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () async {
+                            await DebugLogService.instance.clear();
+                            setSheetState(() {});
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: FutureBuilder<String>(
+                        future: DebugLogService.instance.read(),
+                        builder: (_, snap) {
+                          if (!snap.hasData) {
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          }
+                          return Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F172A),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: SingleChildScrollView(
+                              controller: scrollCtrl,
+                              child: SelectableText(
+                                snap.data!,
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 11,
+                                  height: 1.4,
+                                  color: Color(0xFF86EFAC),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   Widget _buildSection(
     BuildContext context, {
@@ -842,25 +967,31 @@ class _ProfileSkeletonState extends State<_ProfileSkeleton>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 // Avatar circle
-                _bone(t,
-                    width: r(context, 88),
-                    height: r(context, 88),
-                    radius: 44,
-                    onHeader: true),
+                _bone(
+                  t,
+                  width: r(context, 88),
+                  height: r(context, 88),
+                  radius: 44,
+                  onHeader: true,
+                ),
                 SizedBox(height: r(context, 14)),
                 // Name bar
-                _bone(t,
-                    width: r(context, 128),
-                    height: r(context, 15),
-                    radius: 8,
-                    onHeader: true),
+                _bone(
+                  t,
+                  width: r(context, 128),
+                  height: r(context, 15),
+                  radius: 8,
+                  onHeader: true,
+                ),
                 SizedBox(height: r(context, 10)),
                 // Role pill
-                _bone(t,
-                    width: r(context, 78),
-                    height: r(context, 26),
-                    radius: 13,
-                    onHeader: true),
+                _bone(
+                  t,
+                  width: r(context, 78),
+                  height: r(context, 26),
+                  radius: 13,
+                  onHeader: true,
+                ),
               ],
             ),
           ),
@@ -887,20 +1018,26 @@ class _ProfileSkeletonState extends State<_ProfileSkeleton>
                     ),
                     child: Column(
                       children: [
-                        _bone(t,
-                            width: r(context, 34),
-                            height: r(context, 34),
-                            radius: 10),
+                        _bone(
+                          t,
+                          width: r(context, 34),
+                          height: r(context, 34),
+                          radius: 10,
+                        ),
                         SizedBox(height: r(context, 8)),
-                        _bone(t,
-                            width: r(context, 36),
-                            height: r(context, 12),
-                            radius: 6),
+                        _bone(
+                          t,
+                          width: r(context, 36),
+                          height: r(context, 12),
+                          radius: 6,
+                        ),
                         SizedBox(height: r(context, 5)),
-                        _bone(t,
-                            width: r(context, 26),
-                            height: r(context, 10),
-                            radius: 5),
+                        _bone(
+                          t,
+                          width: r(context, 26),
+                          height: r(context, 10),
+                          radius: 5,
+                        ),
                       ],
                     ),
                   ),
@@ -920,10 +1057,12 @@ class _ProfileSkeletonState extends State<_ProfileSkeleton>
                 children: [
                   Padding(
                     padding: const EdgeInsets.only(left: 4, bottom: 10),
-                    child: _bone(t,
-                        width: r(context, 70),
-                        height: r(context, 10),
-                        radius: 5),
+                    child: _bone(
+                      t,
+                      width: r(context, 70),
+                      height: r(context, 10),
+                      radius: 5,
+                    ),
                   ),
                   Container(
                     decoration: BoxDecoration(
@@ -973,21 +1112,55 @@ class _ProfileSkeletonState extends State<_ProfileSkeleton>
       ),
       child: Row(
         children: [
-          _bone(t,
-              width: r(context, 36),
-              height: r(context, 36),
-              radius: 10),
+          _bone(t, width: r(context, 36), height: r(context, 36), radius: 10),
           SizedBox(width: r(context, 14)),
-          Expanded(
-            child: _bone(t, height: r(context, 13), radius: 7),
-          ),
+          Expanded(child: _bone(t, height: r(context, 13), radius: 7)),
           SizedBox(width: r(context, 48)),
-          _bone(t,
-              width: r(context, 14),
-              height: r(context, 14),
-              radius: 4),
+          _bone(t, width: r(context, 14), height: r(context, 14), radius: 4),
         ],
       ),
+    );
+  }
+}
+
+/// Header avatar — shows the employee's [imageUrl] when present, otherwise
+/// falls back to their [initials]. Tolerates both absolute URLs (the backend
+/// returns a full CloudFront URL) and relative keys.
+class _ProfileAvatar extends StatelessWidget {
+  final String? imageUrl;
+  final String initials;
+  final double radius;
+  final double fontSize;
+
+  const _ProfileAvatar({
+    required this.imageUrl,
+    required this.initials,
+    required this.radius,
+    required this.fontSize,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final raw = imageUrl;
+    final hasImage = raw != null && raw.isNotEmpty;
+    final url = hasImage
+        ? (raw.startsWith('http') ? raw : '${ApiConstant.baseUrl}/$raw')
+        : null;
+
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: Colors.white.withValues(alpha: 0.18),
+      backgroundImage: url != null ? NetworkImage(url) : null,
+      child: url == null
+          ? Text(
+              initials,
+              style: AppTextStyles.heading1R(context).copyWith(
+                fontSize: fontSize,
+                fontWeight: FontWeight.bold,
+                color: AppColors.cardWhite,
+              ),
+            )
+          : null,
     );
   }
 }

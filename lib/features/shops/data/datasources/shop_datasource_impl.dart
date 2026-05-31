@@ -3,6 +3,7 @@ import 'package:field_guard_re/core/constants/api_constant.dart';
 import 'package:field_guard_re/core/network/api_runner.dart';
 import 'package:field_guard_re/core/utils/result.dart';
 import 'package:field_guard_re/features/shops/data/models/create_shop_request.dart';
+import 'package:field_guard_re/features/shops/data/models/shop_detail.dart';
 import 'package:field_guard_re/features/shops/data/models/shop_model.dart';
 import 'shop_datasource.dart';
 
@@ -74,5 +75,13 @@ class ShopDataSourceImpl with ApiRunner implements ShopDataSource {
         }
 
         return result;
+      });
+
+  @override
+  Future<Result<ShopDetail>> getShopById(int id) => safeCall(() async {
+        final response = await _dio.get(ApiConstant.shopDetailEndpoint(id));
+        final body = response.data as Map<String, dynamic>;
+        final shopJson = body['shop'] as Map<String, dynamic>? ?? body;
+        return ShopDetail.fromJson(shopJson);
       });
 }

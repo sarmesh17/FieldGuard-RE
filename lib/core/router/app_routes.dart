@@ -27,26 +27,27 @@ class AppRoutes {
   /// Route planning screen
   static const String route = '/route';
 
-  /// Shop details screen
-  static const String shopDetails = '/shop-details';
-
-  /// Active visit tracking screen
-  static const String activeVisit = '/active-visit';
-
-  /// New order creation screen
-  static const String newOrder = '/new-order';
-
-  /// Payment collection screen
+  /// Payment collection screen. Requires `extra` of shape:
+  ///   `{ 'shopId': int, 'shopName': String, 'taskId': int? }`
+  /// Use [collectPaymentExtra] to build the map safely.
   static const String collectPayment = '/collect-payment';
+  static Map<String, dynamic> collectPaymentExtra({
+    required int shopId,
+    required String shopName,
+    int? taskId,
+  }) =>
+      {
+        'shopId': shopId,
+        'shopName': shopName,
+        'taskId': ?taskId,
+      };
 
-  /// SMS sent confirmation screen
+  /// SMS sent confirmation screen. Requires `extra` of shape:
+  ///   `{ 'response': CollectionResponse }`
+  /// Use [smsSentExtra] to build it.
   static const String smsSent = '/sms-sent';
-
-  /// Daily summary report screen
-  static const String dailySummary = '/daily-summary';
-
-  /// Visit history list screen
-  static const String visitHistory = '/visit-history';
+  static Map<String, Object> smsSentExtra({required Object response}) =>
+      {'response': response};
 
   /// Tasks list screen
   static const String tasks = '/tasks';
@@ -79,4 +80,12 @@ class AppRoutes {
 
   /// Shop creation map screen (stand-at-shop flow)
   static const String shopCreateMap = '/shop-create-map';
+
+  /// Shop detail screen (API-backed full details)
+  static const String shopDetail = '/shop-detail/:id';
+  static String shopDetailPath(int id) => '/shop-detail/$id';
+
+  /// Legal screens (accessible before login — no auth required)
+  static const String termsAndConditions = '/terms-and-conditions';
+  static const String privacyPolicy = '/privacy-policy';
 }

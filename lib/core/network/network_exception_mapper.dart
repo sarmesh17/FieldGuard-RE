@@ -18,6 +18,12 @@ class NetworkExceptionMapper {
           return const UnauthorizedException(AppStrings.invalidCredentials);
         }
         final apiMessage = _extractApiMessage(e.response?.data);
+        // 409 = a uniqueness clash (today: globally-unique phone). The
+        // backend's message is already actionable, so show it verbatim via
+        // a dedicated type so callers can distinguish it from a 400.
+        if (status == 409) {
+          return ConflictException(apiMessage ?? AppStrings.serverError);
+        }
         if (apiMessage != null) return ValidationException(apiMessage);
         return const ServerException(AppStrings.serverError);
     }
