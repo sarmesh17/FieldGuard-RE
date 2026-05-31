@@ -8,7 +8,6 @@ import 'package:field_guard_re/core/router/app_routes.dart';
 import 'package:field_guard_re/core/theme/app_colors.dart';
 import 'package:field_guard_re/core/theme/app_responsive.dart';
 import 'package:field_guard_re/core/theme/app_text_styles.dart';
-import 'package:field_guard_re/features/auth/presentation/providers/auth_provider.dart';
 import 'package:field_guard_re/features/collections/data/models/collection_request.dart';
 import 'package:field_guard_re/features/collections/presentation/providers/collections_provider.dart';
 import 'package:field_guard_re/features/tasks/presentation/providers/tasks_provider.dart';
@@ -116,27 +115,23 @@ class _CollectPaymentScreenState extends ConsumerState<CollectPaymentScreen> {
   void _onSubmitStateChange(CollectionSubmitState? prev,
       CollectionSubmitState next) {
     if (next is CollectionSubmitSuccess) {
-      // Outstanding is stale now — refetch on next view. Also invalidate the
-      // task so any "collected so far" indicator can pick up the change.
+      // Outstanding is stale now — invalidate so the next view refetches.
+      // (The response already contains fresh outstanding, but we can't write
+      // into a FutureProvider directly; the cost of a re-GET on next open
+      // is acceptable and keeps the cache the single source of truth.)
       ref.invalidate(shopOutstandingProvider(widget.shopId));
       if (widget.taskId != null) {
         ref.invalidate(taskDetailProvider(widget.taskId!));
       }
 
-      // Pull rep name from auth so the SMS preview matches what the
-      // backend actually sent. Phone we don't have on this screen — pass
-      // a placeholder; the SMS Sent screen treats it as display-only.
-      final auth = ref.read(authNotifierProvider);
-      final repName = auth is AuthSuccess ? auth.response.user.name : 'Rep';
-      final time = DateFormat('HH:mm').format(DateTime.now());
-
-      context.pushReplacement(AppRoutes.smsSent, extra: <String, String>{
-        'shopName': widget.shopName,
-        'phoneNumber': '',
-        'amount': _amount.toStringAsFixed(2),
-        'repName': repName,
-        'time': time,
-      });
+      // Hand the *full* response to the next screen. SmsSentScreen renders
+      // `smsPreview.body` verbatim — no client templating, no reply prompt,
+      // no waiting state. Backend is the single source of truth for what
+      // the shop owner actually received.
+      context.pushReplacement(
+        AppRoutes.smsSent,
+        extra: AppRoutes.smsSentExtra(response: next.response),
+      );
 
       // Reset for safety — the notifier auto-disposes anyway but if the
       // screen rebuilds before disposal we don't want to re-trigger.

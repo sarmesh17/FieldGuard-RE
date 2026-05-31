@@ -15,6 +15,12 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 
+  /// Shared id for the transient geofence enter/exit alert. The same id is
+  /// used whether the alert is fired from the UI isolate or the background
+  /// service isolate, so the two never stack a duplicate — a later `show`
+  /// with this id overwrites the earlier one.
+  static const int geofenceAlertId = 7001;
+
   /// Android channel for geofence arrival/departure alerts. High importance so
   /// it surfaces a heads-up banner even when the app is backgrounded.
   static const _channel = AndroidNotificationChannel(
@@ -79,7 +85,20 @@ class NotificationService {
     required String title,
     required String body,
   }) async {
-    if (!_initialised) await init();
+    // init() can throw in a background-service isolate (plugin quirks /
+    // no Activity for a permission prompt). Don't let that bubble out and get
+    // swallowed by the microtask that fires geofence alerts — log it and
+    // still attempt the show; the channel was already created by the UI
+    // isolate's init() at app launch, so the alert usually lands anyway.
+    if (!_initialised) {
+      try {
+        await init();
+      } catch (e) {
+        await DebugLogService.instance.log(
+          '[notification] init() failed inside show() — attempting anyway: $e',
+        );
+      }
+    }
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
         _channel.id,

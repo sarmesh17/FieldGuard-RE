@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:field_guard_re/core/constants/app_constants.dart';
 import 'package:field_guard_re/core/constants/app_strings.dart';
+import 'package:field_guard_re/core/theme/app_colors.dart';
 import 'package:field_guard_re/core/theme/app_text_styles.dart';
+import 'auth_input_decoration.dart';
 import 'country_code_picker.dart';
 
 class PhoneInputRow extends StatelessWidget {
@@ -13,6 +15,7 @@ class PhoneInputRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         CountryCodePicker(onTap: () => _showCountryPickerStub(context)),
         const SizedBox(width: 10),
@@ -25,9 +28,13 @@ class PhoneInputRow extends StatelessWidget {
               LengthLimitingTextInputFormatter(AppConstants.phoneNumberLength),
             ],
             style: AppTextStyles.inputText,
-            decoration: InputDecoration(
+            decoration: authInputDecoration(
               hintText: AppStrings.phoneHint,
-              hintStyle: AppTextStyles.inputHint,
+              prefixIcon: const Icon(
+                Icons.phone_android_outlined,
+                color: AppColors.textGray,
+                size: 20,
+              ),
             ),
             validator: (value) {
               if (value == null || value.isEmpty) {

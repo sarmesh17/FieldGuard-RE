@@ -4,9 +4,19 @@ class ApiConstant {
 
   // The endpoint for user login
   static const String loginEndpoint = "$baseUrl/api/v1/auth/login";
+  // Public — no auth. Returns { "version": "YYYY-MM-DD" }.
+  static const String legalVersionEndpoint = "$baseUrl/api/v1/legal/version";
   // PATCH (update own profile, EMPLOYEE) + base for profile ops.
   static const String profileEndpoint = "$baseUrl/api/v1/employees/profile";
   static const String authMeEndpoint = "$baseUrl/api/v1/auth/me";
+  // Current-month profile stats (EMPLOYEE only; 403 for ADMIN/MANAGER).
+  static const String authMeStatsEndpoint = "$baseUrl/api/v1/auth/me/stats";
+  // Consolidated home-screen dashboard: profile + one task per status + live
+  // tracking summary. Single round-trip instead of 5 separate calls.
+  static const String dashboardSummaryEndpoint =
+      "$baseUrl/api/v1/dashboard/summary";
+  static const String dashboardTodayTasksEndpoint =
+      "$baseUrl/api/v1/dashboard/today-tasks";
   static const String shopsEndpoint = "$baseUrl/api/v1/shops";
   static String shopDetailEndpoint(int id) => "$baseUrl/api/v1/shops/$id";
   static const String tasksEndpoint = "$baseUrl/api/v1/tasks/my-tasks";

@@ -15,10 +15,20 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   final LoginUseCase _loginUseCase;
 
-  Future<void> login(String phone, String password) async {
+  Future<void> login(
+    String phone,
+    String password, {
+    required bool termsAccepted,
+    required String termsVersion,
+  }) async {
     state = const AuthLoading();
 
-    final result = await _loginUseCase(phone: phone, password: password);
+    final result = await _loginUseCase(
+      phone: phone,
+      password: password,
+      termsAccepted: termsAccepted,
+      termsVersion: termsVersion,
+    );
 
     if (result is Success<LoginResponse>) {
       final tokenRole = _roleFromToken(result.data.accessToken);
@@ -30,8 +40,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return;
       }
 
-      // Inject the role decoded from the JWT into the user object so that
-      // any screen can read currentUser.role reliably.
       if (tokenRole != null) {
         final u = result.data.user;
         final enriched = LoginResponse(
@@ -61,8 +69,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   void reset() => state = const AuthInitial();
 
-  /// Rebuilds an [AuthSuccess] state from the saved JWT after an app restart.
-  /// Returns true when a valid session was restored.
   Future<bool> restoreSession() async {
     final token = await TokenStorage.getAccessToken();
     if (token == null || token.isEmpty) return false;

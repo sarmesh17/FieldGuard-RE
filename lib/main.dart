@@ -32,7 +32,16 @@ void main() async {
   // Close any visit left open by a previous app-kill (flagged exitEstimated)
   // and flush the persisted upload queue. Fire-and-forget — must not delay
   // first paint.
-  GeofenceVisitService.instance.recover();
+  //
+  // BUT: if the foreground location service survived the swipe-kill (it's
+  // sticky), the persisted open-visit is LIVE — the background isolate is
+  // still tracking the agent inside the fence. Recovering it then would
+  // wrongly auto-complete the task mid-visit. So we tell recover() whether
+  // the service is still alive; it only closes genuinely-stale opens.
+  () async {
+    final bgAlive = await BackgroundLocationService.isRunning();
+    await GeofenceVisitService.instance.recover(backgroundServiceAlive: bgAlive);
+  }();
 
   runApp(const ProviderScope(child: MyApp()));
 }

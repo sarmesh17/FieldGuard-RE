@@ -202,6 +202,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
   bool _uploading = false;
   String? _cancelReasonError;
   String? _cancelImageError;
+  bool _showTrackingWarning = false;
 
   @override
   void initState() {
@@ -285,16 +286,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
     if (_selectedStatus == 'IN_PROGRESS' &&
         widget.currentStatus != 'IN_PROGRESS' &&
         !ref.read(trackingNotifierProvider).isActive) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Enable Live Tracking on the Route screen before starting a task.',
-          ),
-          backgroundColor: Color(0xFFDC2626),
-          behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 4),
-        ),
-      );
+      setState(() => _showTrackingWarning = true);
       return;
     }
 
@@ -623,6 +615,7 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
                         selected: _selectedStatus,
                         onChanged: (v) => setState(() {
                           _selectedStatus = v;
+                          _showTrackingWarning = false;
                           if (v != 'CANCELLED') {
                             _selectedCancelReason = null;
                             _cancelImageFile = null;
@@ -693,7 +686,35 @@ class _UpdateBottomSheetState extends ConsumerState<_UpdateBottomSheet> {
                         ),
                         const SizedBox(height: 16),
                       ],
-                      if (errorMsg != null) ...[  
+                      if (_showTrackingWarning) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF7ED),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFFBBF24)),
+                          ),
+                          child: const Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.location_off_outlined,
+                                  size: 16, color: Color(0xFFB45309)),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Live Tracking is off. Enable it on the Route screen before starting a task.',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFF92400E),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (errorMsg != null) ...[
                         const SizedBox(height: 12),
                         Container(
                           padding: const EdgeInsets.all(12),

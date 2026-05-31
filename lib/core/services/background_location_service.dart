@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 
 import 'package:field_guard_re/core/services/debug_log_service.dart';
 import 'package:field_guard_re/core/services/geofence_visit_service.dart';
+import 'package:field_guard_re/core/services/notification_service.dart';
 
 /// Foreground background-service that keeps a high-accuracy location stream
 /// alive in a SEPARATE Dart isolate — surviving the UI being backgrounded or
@@ -135,12 +136,40 @@ void _onStart(ServiceInstance service) async {
   // live; stale opens from a full process death are reconciled by the UI's
   // recover() on next app open.
 
-  // Forward live transitions to the UI (delivered only while the UI is alive;
-  // missed events are fine — the visit itself is persisted + uploaded here).
-  geofence.onEnter = (taskId) =>
-      service.invoke('geofence-event', {'type': 'enter', 'taskId': taskId});
-  geofence.onRealExit = (taskId) =>
-      service.invoke('geofence-event', {'type': 'exit', 'taskId': taskId});
+  // The shop name from the most recent `arm`, so enter/exit notifications
+  // fired HERE (in the isolate) can name the destination. Held at isolate
+  // scope because the detection callbacks only carry a taskId.
+  String? armedShopName;
+
+  // Forward live transitions to the UI (delivered only while the UI is alive)
+  // AND fire the notification from HERE. Firing in the isolate is what makes
+  // the alert survive an app-kill: the UI isolate is dead then, so its
+  // `geofenceEvents()` listener never runs. NotificationService works off the
+  // UI isolate (plugins were re-registered above). Same notification id as the
+  // UI path, so when the app IS alive both fire but the second overwrites the
+  // first — no duplicate.
+  geofence.onEnter = (taskId) async {
+    service.invoke('geofence-event', {'type': 'enter', 'taskId': taskId});
+    final dest = (armedShopName != null && armedShopName!.isNotEmpty)
+        ? armedShopName!
+        : 'your destination';
+    await NotificationService.instance.show(
+      id: NotificationService.geofenceAlertId,
+      title: 'You reached your destination',
+      body: 'You have arrived at $dest.',
+    );
+  };
+  geofence.onRealExit = (taskId) async {
+    service.invoke('geofence-event', {'type': 'exit', 'taskId': taskId});
+    final dest = (armedShopName != null && armedShopName!.isNotEmpty)
+        ? armedShopName!
+        : 'the location';
+    await NotificationService.instance.show(
+      id: NotificationService.geofenceAlertId,
+      title: 'Task completed',
+      body: 'You left $dest — the task was marked completed.',
+    );
+  };
   geofence.onVisitUploaded = (taskId) =>
       service.invoke('geofence-event', {'type': 'uploaded', 'taskId': taskId});
 
@@ -157,10 +186,13 @@ void _onStart(ServiceInstance service) async {
       shopLat: shopLat,
       shopLng: shopLng,
     );
+    // Remember the shop name so enter/exit notifications fired from this
+    // isolate (the app-kill path) can name the destination.
+    final shopName = data['shopName'] as String?;
+    armedShopName = shopName;
     // Reflect what's being tracked in the persistent notification.
     if (service is AndroidServiceInstance) {
       final taskTitle = data['taskTitle'] as String?;
-      final shopName = data['shopName'] as String?;
       final dest = (shopName != null && shopName.isNotEmpty)
           ? shopName
           : (taskTitle ?? 'your task');
@@ -172,6 +204,7 @@ void _onStart(ServiceInstance service) async {
   });
   service.on('disarm').listen((_) {
     geofence.disarm();
+    armedShopName = null;
     if (service is AndroidServiceInstance) {
       service.setForegroundNotificationInfo(
         title: 'FieldGuard',

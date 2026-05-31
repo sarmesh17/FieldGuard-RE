@@ -38,14 +38,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  void _onSkip() {
-    _pageController.animateToPage(
-      _totalPages - 1,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOut,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final hPad = AppResponsive.horizontalPad(context);
@@ -58,28 +50,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: _onSkip,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 12,
-                    ),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text(
-                    AppStrings.skip,
-                    style: TextStyle(
-                      fontSize: AppResponsive.sp(context, 15),
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF157347),
-                    ),
-                  ),
-                ),
-              ),
               const SizedBox(height: 8),
               Expanded(
                 child: PageView.builder(

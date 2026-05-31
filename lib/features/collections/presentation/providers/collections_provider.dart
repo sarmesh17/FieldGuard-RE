@@ -4,6 +4,7 @@ import 'package:field_guard_re/features/auth/presentation/providers/auth_provide
 
 import '../../data/datasources/collections_datasource.dart';
 import '../../data/models/collection_request.dart';
+import '../../data/models/collection_response.dart';
 import '../../data/models/shop_outstanding.dart';
 
 /// Single shared datasource; cheap to construct, no state of its own.
@@ -36,7 +37,8 @@ class CollectionSubmitLoading extends CollectionSubmitState {
 }
 
 class CollectionSubmitSuccess extends CollectionSubmitState {
-  const CollectionSubmitSuccess();
+  final CollectionResponse response;
+  const CollectionSubmitSuccess(this.response);
 }
 
 class CollectionSubmitError extends CollectionSubmitState {
@@ -53,9 +55,9 @@ class CollectionSubmitNotifier extends StateNotifier<CollectionSubmitState> {
   Future<void> submit(CollectionRequest req) async {
     state = const CollectionSubmitLoading();
     try {
-      await _dataSource.submit(req);
+      final response = await _dataSource.submit(req);
       if (!mounted) return;
-      state = const CollectionSubmitSuccess();
+      state = CollectionSubmitSuccess(response);
     } catch (e) {
       if (!mounted) return;
       state = CollectionSubmitError(e.toString());
