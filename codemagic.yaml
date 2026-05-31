@@ -9,7 +9,7 @@ workflows:
     scripts:
       - name: Setup environment
         script: |
-          touch .env
+          touch cp .env.example .env
           sed -i '' "s/platform :ios, '13.0'/platform :ios, '14.0'/g" ios/Podfile || true
           sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = 13.0/IPHONEOS_DEPLOYMENT_TARGET = 14.0/g" ios/Runner.xcodeproj/project.pbxproj || true
       - name: Get Flutter packages
