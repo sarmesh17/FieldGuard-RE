@@ -1,0 +1,30 @@
+workflows:
+  ios-simulator-workflow:
+    name: iOS Simulator Build
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+    scripts:
+      - name: Setup environment
+        script: |
+          touch .env
+          sed -i '' "s/platform :ios, '13.0'/platform :ios, '14.0'/g" ios/Podfile || true
+          sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = 13.0/IPHONEOS_DEPLOYMENT_TARGET = 14.0/g" ios/Runner.xcodeproj/project.pbxproj || true
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+      - name: Generate code with build_runner
+        script: |
+          dart run build_runner build --delete-conflicting-outputs
+      - name: Build iOS for Simulator
+        script: |
+          flutter build ios --simulator --debug --no-codesign
+      - name: Zip simulator build
+        script: |
+          cd build/ios/iphonesimulator
+          zip -r $CM_BUILD_DIR/Runner-simulator.app.zip Runner.app
+          ls -la $CM_BUILD_DIR/Runner-simulator.app.zip
+    artifacts:
+      - Runner-simulator.app.zip
