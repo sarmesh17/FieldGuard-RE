@@ -15,6 +15,12 @@ enum CollectionMethod {
 /// on a CASH payment.
 class CollectionRequest {
   final int shopId;
+
+  /// Task this collection is being recorded under, if the screen was opened
+  /// from a task. Optional and backward-compatible: when omitted the backend
+  /// SMSes only admins + org manager; when sent, the task's responsible
+  /// manager is also notified. Must belong to [shopId].
+  final int? taskId;
   final double amount;
   final CollectionMethod method;
   final String? chequeNumber;
@@ -26,6 +32,7 @@ class CollectionRequest {
 
   const CollectionRequest({
     required this.shopId,
+    this.taskId,
     required this.amount,
     required this.method,
     this.chequeNumber,
@@ -40,6 +47,9 @@ class CollectionRequest {
       'amount': amount,
       'method': method.wire,
     };
+    if (taskId != null) {
+      body['taskId'] = taskId;
+    }
     if (method == CollectionMethod.cheque) {
       if (chequeNumber != null && chequeNumber!.isNotEmpty) {
         body['chequeNumber'] = chequeNumber;

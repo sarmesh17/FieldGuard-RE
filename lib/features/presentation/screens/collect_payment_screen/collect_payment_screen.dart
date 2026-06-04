@@ -97,6 +97,7 @@ class _CollectPaymentScreenState extends ConsumerState<CollectPaymentScreen> {
 
     final req = CollectionRequest(
       shopId: widget.shopId,
+      taskId: widget.taskId,
       amount: _amount,
       method: _method,
       chequeNumber: _method == CollectionMethod.cheque
