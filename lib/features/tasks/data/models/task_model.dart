@@ -80,11 +80,61 @@ class TaskGeofenceVisit {
       );
 }
 
+/// A single checklist item on a task. The backend now tracks per-item
+/// done-state (who ticked it and when) instead of a plain string list.
+///
+/// Tolerates a plain-string element too (`"text"`) for backward-compat / the
+/// create-echo, mapping it to an un-ticked item.
+class TaskItem {
+  final int? id;
+  final String text;
+  final bool done;
+  final DateTime? doneAt;
+  final int? doneBy;
+
+  const TaskItem({
+    this.id,
+    required this.text,
+    this.done = false,
+    this.doneAt,
+    this.doneBy,
+  });
+
+  TaskItem copyWith({bool? done, DateTime? doneAt, int? doneBy}) => TaskItem(
+        id: id,
+        text: text,
+        done: done ?? this.done,
+        doneAt: doneAt ?? this.doneAt,
+        doneBy: doneBy ?? this.doneBy,
+      );
+
+  factory TaskItem.fromJson(Map<String, dynamic> j) => TaskItem(
+        id: (j['id'] as num?)?.toInt(),
+        text: (j['text'] ?? '').toString(),
+        done: j['done'] == true,
+        doneAt: _parseDt(j['doneAt'] ?? j['done_at']),
+        doneBy: (j['doneBy'] ?? j['done_by']) is num
+            ? ((j['doneBy'] ?? j['done_by']) as num).toInt()
+            : null,
+      );
+
+  factory TaskItem.fromText(String text) => TaskItem(text: text);
+
+  static DateTime? _parseDt(dynamic v) =>
+      v is String && v.isNotEmpty ? DateTime.tryParse(v) : null;
+}
+
 class TaskModel {
   final int id;
   final String title;
   final String description;
-  final List<String> items;
+  final List<TaskItem> items;
+
+  /// Checklist progress. Mirrors the server's `itemsProgress` when present
+  /// (e.g. on lightweight list payloads that omit `items`); otherwise derived
+  /// from [items].
+  final int itemsTotal;
+  final int itemsDone;
   final String status;
   final String priority;
   final String? shopLatitude;
@@ -107,6 +157,8 @@ class TaskModel {
     required this.title,
     required this.description,
     required this.items,
+    this.itemsTotal = 0,
+    this.itemsDone = 0,
     required this.status,
     required this.priority,
     this.shopLatitude,
@@ -127,11 +179,23 @@ class TaskModel {
 
   factory TaskModel.fromJson(Map<String, dynamic> json) {
     final rawItems = json['items'] as List<dynamic>? ?? [];
+    final items = rawItems
+        .map((e) => e is Map
+            ? TaskItem.fromJson(Map<String, dynamic>.from(e))
+            : TaskItem.fromText(e.toString()))
+        .toList();
+    final progress = json['itemsProgress'];
+    final progTotal =
+        progress is Map ? (progress['total'] as num?)?.toInt() : null;
+    final progDone =
+        progress is Map ? (progress['done'] as num?)?.toInt() : null;
     return TaskModel(
       id: json['id'] as int,
       title: (json['title'] ?? '') as String,
       description: (json['description'] ?? '') as String,
-      items: rawItems.map((e) => e.toString()).toList(),
+      items: items,
+      itemsTotal: progTotal ?? items.length,
+      itemsDone: progDone ?? items.where((i) => i.done).length,
       status: (json['status'] ?? 'PENDING') as String,
       priority: (json['priority'] ?? 'MEDIUM') as String,
       shopLatitude: json['shop_latitude'] as String?,

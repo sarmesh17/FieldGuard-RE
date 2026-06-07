@@ -548,16 +548,39 @@ class _TaskCardState extends State<_TaskCard>
                                               color: const Color(0xFFE5E7EB),
                                             ),
                                           ),
-                                          child: Text(
-                                            item,
-                                            style: TextStyle(
-                                              fontSize: AppResponsive.sp(
-                                                context,
-                                                12,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              if (item.done) ...[
+                                                Icon(
+                                                  Icons.check_circle,
+                                                  size: AppResponsive.sp(
+                                                    context,
+                                                    13,
+                                                  ),
+                                                  color:
+                                                      const Color(0xFF1B5E4F),
+                                                ),
+                                                const SizedBox(width: 4),
+                                              ],
+                                              Text(
+                                                item.text,
+                                                style: TextStyle(
+                                                  fontSize: AppResponsive.sp(
+                                                    context,
+                                                    12,
+                                                  ),
+                                                  color: item.done
+                                                      ? const Color(0xFF9CA3AF)
+                                                      : const Color(0xFF374151),
+                                                  fontWeight: FontWeight.w500,
+                                                  decoration: item.done
+                                                      ? TextDecoration
+                                                          .lineThrough
+                                                      : null,
+                                                ),
                                               ),
-                                              color: const Color(0xFF374151),
-                                              fontWeight: FontWeight.w500,
-                                            ),
+                                            ],
                                           ),
                                         ),
                                       )

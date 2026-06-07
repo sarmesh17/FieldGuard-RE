@@ -31,73 +31,98 @@ class LiveTrackingService {
   Position? _lastPosition;
   bool _trackingStarted = false;
 
+  /// Live in-app notification pushed over this (tracking) socket. The server
+  /// auto-joins the connection to the user's private room and emits
+  /// `notification:new` with the same shape as a `GET /notifications` item.
+  /// Wired by MainShell into the notifications provider. NOTE: this socket is
+  /// only connected during a tracking session, so it's a foreground polish on
+  /// top of FCM — not the primary delivery path.
+  void Function(Map<String, dynamic> json)? onNotification;
+
+  /// Fired on every socket (re)connect so the inbox can resync. The socket has
+  /// no replay queue — anything that arrived while disconnected is only in the
+  /// DB (and via FCM), so we refetch the list + unreadCount on (re)connect.
+  void Function()? onSocketConnected;
+
   /// Set of active reasons keeping the tracking session alive.
   /// Sample reasons: `'manual'` (user toggle), `'task'` (active IN_PROGRESS task).
   /// The session stops when this set becomes empty.
   final Set<String> _reasons = <String>{};
 
-  bool get isRunning => _socket?.connected ?? false;
+  /// True while a tracking session (location streaming) is active. NOTE: the
+  /// socket can be connected for notifications without tracking — use
+  /// [isConnected] for raw connection state.
+  bool get isRunning => _trackingStarted;
+  bool get isConnected => _socket?.connected ?? false;
   bool isReasonActive(String reason) => _reasons.contains(reason);
 
-  /// Connects, starts the session and begins streaming location.
-  /// Completes once the socket is connected and `tracking:start` is emitted;
-  /// throws [StateError] if not authenticated or the connection fails.
-  /// [reason] tracks why the session is active; multiple reasons can hold
-  /// the session open at the same time.
-  Future<void> start({String reason = 'manual'}) async {
-    _reasons.add(reason);
-    if (_socket != null) return; // already running / starting
+  /// Guards against two sockets being created if connect()/start() race during
+  /// the async token read.
+  bool _creatingSocket = false;
 
-    final token = await TokenStorage.getAccessToken();
-    if (token == null || token.isEmpty) {
-      throw StateError('Not authenticated — please log in again.');
-    }
+  /// Completes when the current socket finishes (or fails) connecting — lets
+  /// [start] surface a connection failure to the tracking toggle.
+  Completer<void>? _connectCompleter;
 
-    final connected = Completer<void>();
-
-    final socket = io.io(
-      ApiConstant.baseUrl,
-      io.OptionBuilder()
-          .setTransports(['websocket'])
-          .setAuth({'token': token})
-          .disableAutoConnect()
-          .enableReconnection()
-          .build(),
-    );
-    _socket = socket;
-
-    socket.onConnect((_) {
-      // Open the session only on the first connect of this run; on later
-      // reconnects the server resumes the existing session and we just
-      // keep streaming location, avoiding duplicate sessions.
-      if (!_trackingStarted) {
-        _trackingStarted = true;
-        socket.emit('tracking:start');
-        _beginLocationStream();
-      }
-      if (!connected.isCompleted) connected.complete();
-    });
-
-    socket.onConnectError((Object? err) {
-      if (!connected.isCompleted) {
-        connected.completeError(
-          StateError('Could not connect to tracking server.'),
-        );
-      }
-    });
-
-    socket.connect();
-
+  /// Opens the socket for live notifications + presence WITHOUT starting a
+  /// tracking session. Call on login / session-restore / app-resume so
+  /// `notification:new` arrives whenever the app is foreground — independent of
+  /// tracking. Idempotent; silently no-ops if not authenticated.
+  Future<void> connect() async {
     try {
-      await connected.future.timeout(_connectTimeout);
-    } catch (e) {
-      await stop(force: true);
-      rethrow;
+      await _ensureSocket();
+    } on StateError {
+      // Not logged in — notifications need a session; skip quietly.
     }
   }
 
-  /// Releases the given [reason]. The session is only torn down when no
-  /// reasons remain (or when [force] is true).
+  /// Closes the socket completely (call on logout / session end). Ends any
+  /// active tracking session too.
+  Future<void> disconnect() async {
+    _reasons.clear();
+    _stopLocationStream();
+    final socket = _socket;
+    if (socket != null) {
+      if (socket.connected && _trackingStarted) socket.emit('tracking:stop');
+      socket.dispose();
+    }
+    _socket = null;
+    _connectCompleter = null;
+    _lastPosition = null;
+    _trackingStarted = false;
+  }
+
+  /// Starts a tracking session (location streaming), connecting the socket first
+  /// if it isn't already up. [reason] holds the session open; multiple reasons
+  /// stack. Throws [StateError] if not authenticated or the connection fails.
+  Future<void> start({String reason = 'manual'}) async {
+    _reasons.add(reason);
+
+    // Reuse an already-connected socket (e.g. the notifications one) — just
+    // open the session.
+    if (_socket?.connected ?? false) {
+      _beginTrackingSession();
+      return;
+    }
+
+    try {
+      await _ensureSocket();
+      final c = _connectCompleter;
+      if (c != null && !c.isCompleted) {
+        await c.future.timeout(_connectTimeout);
+      }
+    } catch (e) {
+      _reasons.remove(reason);
+      rethrow;
+    }
+
+    // Connected now — open the session (onConnect may have already done it).
+    if (_socket?.connected ?? false) _beginTrackingSession();
+  }
+
+  /// Releases the given [reason]. The tracking session is torn down when no
+  /// reasons remain (or [force] is true) — but the socket STAYS connected for
+  /// notifications. Use [disconnect] (logout) to actually close it.
   Future<void> stop({String reason = 'manual', bool force = false}) async {
     if (force) {
       _reasons.clear();
@@ -105,23 +130,94 @@ class LiveTrackingService {
       _reasons.remove(reason);
       if (_reasons.isNotEmpty) return; // still wanted by another caller
     }
+    _stopTrackingSession();
+  }
 
+  /// Lazily creates + connects the shared socket (notifications + tracking) and
+  /// registers the connect / notification listeners. Idempotent.
+  Future<void> _ensureSocket() async {
+    if (_socket != null || _creatingSocket) return;
+    _creatingSocket = true;
+    try {
+      final token = await TokenStorage.getAccessToken();
+      if (token == null || token.isEmpty) {
+        throw StateError('Not authenticated — please log in again.');
+      }
+
+      final socket = io.io(
+        ApiConstant.baseUrl,
+        io.OptionBuilder()
+            .setTransports(['websocket'])
+            .setAuth({'token': token})
+            .disableAutoConnect()
+            .enableReconnection()
+            .build(),
+      );
+      _socket = socket;
+      final connected = Completer<void>();
+      _connectCompleter = connected;
+
+      socket.onConnect((_) {
+        // Resync the inbox on every (re)connect — no server-side replay queue.
+        onSocketConnected?.call();
+        // (Re)open the tracking session if one is wanted. On a transient
+        // reconnect _trackingStarted stays true, so the server resumes the
+        // existing session and we don't re-emit / re-stream.
+        if (_reasons.isNotEmpty && !_trackingStarted) _beginTrackingSession();
+        if (!connected.isCompleted) connected.complete();
+      });
+
+      socket.onConnectError((Object? err) {
+        if (!connected.isCompleted) {
+          connected.completeError(
+            StateError('Could not connect to tracking server.'),
+          );
+        }
+      });
+
+      // Real-time in-app notifications over the same connection. Silent (no
+      // banner) — only updates the list + badge; the heads-up banner comes from
+      // FCM, so a foreground push + socket event don't double-notify.
+      socket.on('notification:new', (Object? data) {
+        if (data is Map) {
+          onNotification?.call(Map<String, dynamic>.from(data));
+        }
+      });
+
+      socket.connect();
+    } finally {
+      _creatingSocket = false;
+    }
+  }
+
+  /// Opens the tracking session (emit `tracking:start` + stream location), once
+  /// — guarded so reconnects / duplicate calls don't restart it.
+  void _beginTrackingSession() {
+    if (_trackingStarted) return;
+    final socket = _socket;
+    if (socket == null || !socket.connected) return;
+    _trackingStarted = true;
+    socket.emit('tracking:start');
+    _beginLocationStream();
+  }
+
+  /// Ends the tracking session (emit `tracking:stop` + stop streaming) but keeps
+  /// the socket connected for notifications.
+  void _stopTrackingSession() {
+    _stopLocationStream();
+    final socket = _socket;
+    if (socket != null && socket.connected && _trackingStarted) {
+      socket.emit('tracking:stop');
+    }
+    _trackingStarted = false;
+    _lastPosition = null;
+  }
+
+  void _stopLocationStream() {
     _emitTimer?.cancel();
     _emitTimer = null;
-
-    await _positionSub?.cancel();
+    _positionSub?.cancel();
     _positionSub = null;
-
-    final socket = _socket;
-    if (socket != null) {
-      if (socket.connected && _trackingStarted) {
-        socket.emit('tracking:stop');
-      }
-      socket.dispose();
-    }
-    _socket = null;
-    _lastPosition = null;
-    _trackingStarted = false;
   }
 
   void _beginLocationStream() {

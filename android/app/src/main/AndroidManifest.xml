@@ -59,6 +59,30 @@
             android:stopWithTask="false"
             tools:replace="android:stopWithTask" />
 
+        <!-- Remove the plugin's BOOT_COMPLETED receiver. On Android 14+ a
+             location foreground service CANNOT be started from a boot receiver
+             (ForegroundServiceStartNotAllowedException → crash). Our tracking
+             is user/task-driven and requires the app to be in the foreground to
+             start, so reboot auto-restart isn't needed (and was crashing). This
+             does NOT affect swipe-kill survival (handled by stopWithTask=false
+             + START_STICKY), only device-reboot restart. -->
+        <receiver
+            android:name="id.flutter.flutter_background_service.BootReceiver"
+            tools:node="remove" />
+
+        <!-- FCM: small icon + accent colour for notifications the OS renders
+             itself (background/terminated). Foreground pushes are shown by
+             flutter_local_notifications, which use the same drawable. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_color" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="push_alerts" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

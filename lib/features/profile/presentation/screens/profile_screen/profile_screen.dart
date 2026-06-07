@@ -1,13 +1,13 @@
 import 'dart:ui' show lerpDouble;
 
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:field_guard_re/core/constants/api_constant.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
-import 'package:field_guard_re/core/services/debug_log_service.dart';
 import 'package:field_guard_re/core/services/geofence_visit_service.dart';
+import 'package:field_guard_re/core/services/live_tracking_service.dart';
+import 'package:field_guard_re/core/services/push_notification_service.dart';
 import 'package:field_guard_re/core/services/token_storage.dart';
 import 'package:field_guard_re/core/theme/app_colors.dart';
 import 'package:field_guard_re/core/theme/app_responsive.dart';
@@ -408,27 +408,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
           ),
         ),
 
-        // DEVELOPER — Debug Logs viewer is a developer tool, hidden in release.
-        if (kDebugMode)
-          _animatedSection(
-            fade: _footerFade,
-            slide: _footerSlide,
-            child: _buildSection(
-              context,
-              hPad: hPad,
-              title: 'DEVELOPER',
-              items: [
-                _Item(
-                  icon: Icons.bug_report_outlined,
-                  label: 'Debug Logs',
-                  iconColor: const Color(0xFFEA580C),
-                  iconBg: const Color(0xFFFFF7ED),
-                  onTap: () => _showDebugLogs(context),
-                ),
-              ],
-            ),
-          ),
-
         const SizedBox(height: 8),
 
         // Sign out + version
@@ -445,6 +424,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                       // Stop geofence detection/uploads for this session;
                       // persisted visit + queue resume after re-login.
                       GeofenceVisitService.instance.stop();
+                      // Close the realtime notification/tracking socket.
+                      await LiveTrackingService.instance.disconnect();
+                      // Drop this device's push token on the backend while the
+                      // session is still valid (DELETE needs the bearer), then
+                      // clear local tokens.
+                      await PushNotificationService.instance.unregisterToken();
                       await TokenStorage.clearTokens();
                       if (context.mounted) context.go(AppRoutes.login);
                     },
@@ -636,108 +621,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
   }
 
   // ── Menu section ──────────────────────────────────────────────────────────
-
-  /// On-device debug log viewer — reads the persisted geofence trace so it can
-  /// be reviewed (and shared to a laptop) in the field without `flutter logs`.
-  void _showDebugLogs(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (sheetCtx, setSheetState) {
-            return DraggableScrollableSheet(
-              initialChildSize: 0.85,
-              maxChildSize: 0.95,
-              minChildSize: 0.5,
-              expand: false,
-              builder: (_, scrollCtrl) => Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.bug_report_outlined,
-                          color: Color(0xFFEA580C),
-                        ),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            'Debug Logs',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Refresh',
-                          icon: const Icon(Icons.refresh),
-                          onPressed: () => setSheetState(() {}),
-                        ),
-                        IconButton(
-                          tooltip: 'Share',
-                          icon: const Icon(Icons.ios_share),
-                          onPressed: () => DebugLogService.instance.share(),
-                        ),
-                        IconButton(
-                          tooltip: 'Clear',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () async {
-                            await DebugLogService.instance.clear();
-                            setSheetState(() {});
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: FutureBuilder<String>(
-                        future: DebugLogService.instance.read(),
-                        builder: (_, snap) {
-                          if (!snap.hasData) {
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
-                          }
-                          return Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0F172A),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: SingleChildScrollView(
-                              controller: scrollCtrl,
-                              child: SelectableText(
-                                snap.data!,
-                                style: const TextStyle(
-                                  fontFamily: 'monospace',
-                                  fontSize: 11,
-                                  height: 1.4,
-                                  color: Color(0xFF86EFAC),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 
   Widget _buildSection(
     BuildContext context, {

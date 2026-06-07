@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
+import 'package:field_guard_re/core/services/live_tracking_service.dart';
+import 'package:field_guard_re/core/services/push_notification_service.dart';
 import 'package:field_guard_re/features/geofence/presentation/providers/geofence_provider.dart';
+import 'package:field_guard_re/features/notifications/presentation/providers/notifications_provider.dart';
 import 'package:field_guard_re/features/tasks/presentation/providers/tasks_provider.dart';
 import 'package:field_guard_re/features/tracking/presentation/providers/tracking_provider.dart';
 import 'bottom_nav_bar.dart';
@@ -45,6 +48,32 @@ class _MainShellState extends ConsumerState<MainShell> {
       if (!mounted) return;
       ref.read(trackingNotifierProvider.notifier).restore();
     });
+
+    // A foreground push means the backend just added an inbox item — refresh
+    // the list + unread badge live. Cleared in dispose.
+    PushNotificationService.instance.onInboxChanged = () {
+      if (mounted) ref.read(notificationsNotifierProvider.notifier).refresh();
+    };
+
+    // Real-time notifications over the tracking socket (only while a tracking
+    // session is connected — see LiveTrackingService). Prepend live; resync the
+    // whole inbox on (re)connect since the socket has no replay queue.
+    LiveTrackingService.instance.onNotification = (json) {
+      if (mounted) {
+        ref.read(notificationsNotifierProvider.notifier).addRealtime(json);
+      }
+    };
+    LiveTrackingService.instance.onSocketConnected = () {
+      if (mounted) ref.read(notificationsNotifierProvider.notifier).refresh();
+    };
+  }
+
+  @override
+  void dispose() {
+    PushNotificationService.instance.onInboxChanged = null;
+    LiveTrackingService.instance.onNotification = null;
+    LiveTrackingService.instance.onSocketConnected = null;
+    super.dispose();
   }
 
   @override

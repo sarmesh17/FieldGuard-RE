@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:field_guard_re/core/constants/app_strings.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
+import 'package:field_guard_re/core/services/live_tracking_service.dart';
+import 'package:field_guard_re/core/services/push_notification_service.dart';
 import 'package:field_guard_re/core/theme/app_colors.dart';
 import 'package:field_guard_re/core/theme/app_responsive.dart';
 import 'package:field_guard_re/core/theme/app_text_styles.dart';
@@ -74,6 +76,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     ref.listen<AuthState>(authNotifierProvider, (_, state) {
       if (state is AuthSuccess) {
         ref.read(authNotifierProvider.notifier).reset();
+        // Session is live (tokens already saved) — register this device's FCM
+        // token with the backend so it can push to it. Fire-and-forget.
+        unawaited(PushNotificationService.instance.registerToken());
+        // Open the realtime socket for live in-app notifications (independent
+        // of live tracking — so notifications arrive even with tracking off).
+        unawaited(LiveTrackingService.instance.connect());
         context.go(AppRoutes.home);
       }
       // AuthError no longer triggers a SnackBar — it's rendered inline inside

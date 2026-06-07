@@ -216,6 +216,7 @@ class _CollectPaymentScreenState extends ConsumerState<CollectPaymentScreen> {
                     chequeDate: _chequeDate,
                     onPickChequeDate: _pickChequeDate,
                     notesCtl: _notesCtl,
+                    outstanding: outstandingAsync.valueOrNull?.outstanding,
                   ),
                 ],
               ),
@@ -249,7 +250,9 @@ class _CollectPaymentScreenState extends ConsumerState<CollectPaymentScreen> {
                         ),
                       )
                     : Text(
-                        'Confirm & Send SMS',
+                        _method == CollectionMethod.cheque
+                            ? 'Record Cheque'
+                            : 'Confirm & Send SMS',
                         style: AppTextStyles.buttonTextR(context).copyWith(
                           fontSize: AppResponsive.sp(context, 16),
                         ),
@@ -441,6 +444,10 @@ class _AmountAndMethodCard extends StatelessWidget {
   final VoidCallback onPickChequeDate;
   final TextEditingController notesCtl;
 
+  /// The shop's outstanding balance (when loaded) — powers the "Use full
+  /// balance" shortcut next to the amount field.
+  final double? outstanding;
+
   const _AmountAndMethodCard({
     required this.amountCtl,
     required this.method,
@@ -450,11 +457,13 @@ class _AmountAndMethodCard extends StatelessWidget {
     required this.chequeDate,
     required this.onPickChequeDate,
     required this.notesCtl,
+    required this.outstanding,
   });
 
   @override
   Widget build(BuildContext context) {
     final dateFmt = DateFormat('d MMM yyyy');
+    final canUseFull = outstanding != null && outstanding! > 0;
 
     return Container(
       width: double.infinity,
@@ -476,77 +485,80 @@ class _AmountAndMethodCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionLabel(text: 'ENTER AMOUNT'),
-          const SizedBox(height: 8),
-          TextField(
-            controller: amountCtl,
-            // Allow up to 2 decimals; the backend stores Decimal.
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
-            ],
-            style: AppTextStyles.inputTextR(context).copyWith(
-              fontSize: AppResponsive.sp(context, 28),
-              fontWeight: FontWeight.bold,
-            ),
-            decoration: InputDecoration(
-              prefixText: '₹ ',
-              prefixStyle: AppTextStyles.inputTextR(context).copyWith(
-                fontSize: AppResponsive.sp(context, 28),
-                fontWeight: FontWeight.bold,
-                color: AppColors.textLight,
-              ),
-              hintText: '0',
-              hintStyle: AppTextStyles.inputHintR(context).copyWith(
-                fontSize: AppResponsive.sp(context, 28),
-                fontWeight: FontWeight.bold,
-              ),
-              border: _border(),
-              enabledBorder: _border(),
-              focusedBorder: _border(focused: true),
-              contentPadding: const EdgeInsets.symmetric(
-                vertical: 8,
-                horizontal: 16,
-              ),
-            ),
-          ),
-          SizedBox(height: AppResponsive.r(context, 18)),
-          _SectionLabel(text: 'PAYMENT METHOD'),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: AppResponsive.r(context, 10),
-            runSpacing: 8,
+          Row(
             children: [
-              for (final m in CollectionMethod.values)
-                ChoiceChip(
-                  label: Text(
-                    _methodLabel(m),
-                    style: AppTextStyles.labelR(context).copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: m == method
-                          ? AppColors.buttonTextWhite
-                          : AppColors.textGray,
-                      fontSize: AppResponsive.sp(context, 14),
+              _SectionLabel(text: 'ENTER AMOUNT'),
+              const Spacer(),
+              if (canUseFull)
+                InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () {
+                    final v = outstanding!.toStringAsFixed(2);
+                    amountCtl.text = v;
+                    amountCtl.selection =
+                        TextSelection.collapsed(offset: v.length);
+                  },
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD1FADF),
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                  ),
-                  selected: m == method,
-                  selectedColor: AppColors.primaryGreen,
-                  backgroundColor: AppColors.cardWhite,
-                  side: m == method
-                      ? BorderSide.none
-                      : const BorderSide(color: AppColors.inputBorder),
-                  onSelected: (_) => onMethodChange(m),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  labelPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 2,
+                    child: Text(
+                      'Use full balance',
+                      style: AppTextStyles.labelR(context).copyWith(
+                        color: AppColors.primaryGreen,
+                        fontWeight: FontWeight.w600,
+                        fontSize: AppResponsive.sp(context, 12),
+                      ),
+                    ),
                   ),
                 ),
             ],
           ),
+          const SizedBox(height: 10),
+          // Prominent, filled amount field.
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.backgroundBeige,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.inputBorder),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: amountCtl,
+              // Allow up to 2 decimals; the backend stores Decimal.
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+              ],
+              style: AppTextStyles.inputTextR(context).copyWith(
+                fontSize: AppResponsive.sp(context, 30),
+                fontWeight: FontWeight.bold,
+              ),
+              decoration: InputDecoration(
+                prefixText: '₹ ',
+                prefixStyle: AppTextStyles.inputTextR(context).copyWith(
+                  fontSize: AppResponsive.sp(context, 30),
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textLight,
+                ),
+                hintText: '0',
+                hintStyle: AppTextStyles.inputHintR(context).copyWith(
+                  fontSize: AppResponsive.sp(context, 30),
+                  fontWeight: FontWeight.bold,
+                ),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+          SizedBox(height: AppResponsive.r(context, 20)),
+          _SectionLabel(text: 'PAYMENT METHOD'),
+          const SizedBox(height: 10),
+          _MethodToggle(method: method, onChange: onMethodChange),
           // Cheque-only fields. AnimatedSize keeps the layout smooth when
           // toggling between CASH and CHEQUE.
           AnimatedSize(
@@ -662,11 +674,6 @@ class _AmountAndMethodCard extends StatelessWidget {
     );
   }
 
-  static String _methodLabel(CollectionMethod m) => switch (m) {
-        CollectionMethod.cash => 'Cash',
-        CollectionMethod.cheque => 'Cheque',
-      };
-
   static OutlineInputBorder _border({bool focused = false}) =>
       OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
@@ -689,6 +696,90 @@ class _SectionLabel extends StatelessWidget {
         fontWeight: FontWeight.w600,
         fontSize: AppResponsive.sp(context, 12),
         letterSpacing: 0.5,
+      ),
+    );
+  }
+}
+
+// ─── Cash / Cheque segmented toggle ───────────────────────────────────────
+
+class _MethodToggle extends StatelessWidget {
+  final CollectionMethod method;
+  final ValueChanged<CollectionMethod> onChange;
+
+  const _MethodToggle({required this.method, required this.onChange});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.backgroundBeige,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.inputBorder),
+      ),
+      child: Row(
+        children: [
+          _segment(
+            context,
+            CollectionMethod.cash,
+            'Cash',
+            Icons.payments_outlined,
+          ),
+          const SizedBox(width: 4),
+          _segment(
+            context,
+            CollectionMethod.cheque,
+            'Cheque',
+            Icons.receipt_long_outlined,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _segment(
+    BuildContext context,
+    CollectionMethod m,
+    String label,
+    IconData icon,
+  ) {
+    final selected = m == method;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => onChange(m),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          padding:
+              EdgeInsets.symmetric(vertical: AppResponsive.r(context, 12)),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primaryGreen : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: AppResponsive.r(context, 18),
+                color:
+                    selected ? AppColors.buttonTextWhite : AppColors.textGray,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: AppTextStyles.labelR(context).copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: selected
+                      ? AppColors.buttonTextWhite
+                      : AppColors.textGray,
+                  fontSize: AppResponsive.sp(context, 14),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

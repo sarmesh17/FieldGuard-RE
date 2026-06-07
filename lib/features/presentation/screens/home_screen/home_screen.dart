@@ -9,6 +9,7 @@ import 'package:field_guard_re/core/router/app_routes.dart';
 import 'package:field_guard_re/core/theme/app_responsive.dart';
 import 'package:field_guard_re/features/dashboard/data/models/dashboard_summary.dart';
 import 'package:field_guard_re/features/dashboard/presentation/providers/dashboard_provider.dart';
+import 'package:field_guard_re/features/notifications/presentation/providers/notifications_provider.dart';
 import 'package:field_guard_re/features/tasks/data/models/task_model.dart';
 
 const _kGreen = Color(0xFF157347);
@@ -56,6 +57,57 @@ class HomeScreen extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Notification bell ──────────────────────────────────────────────────────────
+
+/// Bell icon that opens the inbox, with an unread-count badge driven by
+/// [unreadNotificationCountProvider]. Watching the provider here also kicks off
+/// the first inbox fetch on home load.
+class _NotificationBell extends ConsumerWidget {
+  const _NotificationBell();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unread = ref.watch(unreadNotificationCountProvider);
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconButton(
+          onPressed: () => context.push(AppRoutes.notifications),
+          icon: Icon(
+            Icons.notifications_none,
+            color: Colors.white,
+            size: AppResponsive.r(context, 26),
+          ),
+        ),
+        if (unread > 0)
+          Positioned(
+            right: 6,
+            top: 6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+              decoration: BoxDecoration(
+                color: const Color(0xFFDC2626),
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: Colors.white, width: 1.5),
+              ),
+              child: Text(
+                unread > 99 ? '99+' : '$unread',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  height: 1.2,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -138,15 +190,8 @@ class _Header extends StatelessWidget {
                       ],
                     ),
                   ),
-                  // Notifications
-                  IconButton(
-                    onPressed: () => context.push(AppRoutes.notifications),
-                    icon: Icon(
-                      Icons.notifications_none,
-                      color: Colors.white,
-                      size: AppResponsive.r(context, 26),
-                    ),
-                  ),
+                  // Notifications (with unread badge)
+                  const _NotificationBell(),
                   // Avatar → Profile tab
                   GestureDetector(
                     onTap: () => context.go(AppRoutes.profile),

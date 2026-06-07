@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:field_guard_re/core/errors/app_exception.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
+import 'package:field_guard_re/core/utils/result.dart';
 import 'package:field_guard_re/features/shops/presentation/providers/shop_provider.dart';
 import 'package:field_guard_re/features/tasks/data/models/task_model.dart';
 import 'package:field_guard_re/features/tasks/data/models/update_task_request.dart';
@@ -1112,62 +1114,10 @@ class _DetailBody extends StatelessWidget {
 
           // ── Checklist items ──────────────────────────────────────────────
           if (task.items.isNotEmpty) ...[
-            _SectionHeader(label: 'Checklist', icon: Icons.checklist_rounded),
-            _Card(
-              child: Column(
-                children: task.items.asMap().entries.map((entry) {
-                  final isLast = entry.key == task.items.length - 1;
-                  return Column(
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 22,
-                            height: 22,
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: const Color(0xFF1B5E4F),
-                                width: 1.5,
-                              ),
-                              borderRadius: BorderRadius.circular(6),
-                              color: task.status == 'COMPLETED'
-                                  ? const Color(0xFF1B5E4F)
-                                  : Colors.transparent,
-                            ),
-                            child: task.status == 'COMPLETED'
-                                ? const Icon(
-                                    Icons.check,
-                                    size: 14,
-                                    color: Colors.white,
-                                  )
-                                : null,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              entry.value,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: task.status == 'COMPLETED'
-                                    ? const Color(0xFF9CA3AF)
-                                    : const Color(0xFF374151),
-                                decoration: task.status == 'COMPLETED'
-                                    ? TextDecoration.lineThrough
-                                    : null,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (!isLast) ...[
-                        const SizedBox(height: 10),
-                        const Divider(height: 1, color: Color(0xFFF3F4F6)),
-                        const SizedBox(height: 10),
-                      ],
-                    ],
-                  );
-                }).toList(),
-              ),
+            _ChecklistSection(
+              taskId: task.id,
+              items: task.items,
+              status: task.status,
             ),
             const SizedBox(height: 12),
           ],
@@ -1510,6 +1460,213 @@ class _SS {
 }
 
 // ── Reusable widgets ──────────────────────────────────────────────────────────
+
+// ── Interactive checklist ─────────────────────────────────────────────────────
+
+/// Per-item checklist. The assignee can tick/untick each item (PATCH
+/// `/tasks/:id/items/:itemId`); the change is optimistic and reverts on
+/// failure. Read-only once the task is COMPLETED/CANCELLED. Items keep their
+/// own done-state — completing a task does NOT auto-tick anything.
+class _ChecklistSection extends ConsumerStatefulWidget {
+  final int taskId;
+  final List<TaskItem> items;
+  final String status;
+
+  const _ChecklistSection({
+    required this.taskId,
+    required this.items,
+    required this.status,
+  });
+
+  @override
+  ConsumerState<_ChecklistSection> createState() => _ChecklistSectionState();
+}
+
+class _ChecklistSectionState extends ConsumerState<_ChecklistSection> {
+  late List<TaskItem> _items = List.of(widget.items);
+  int? _busyItemId;
+
+  bool get _editable =>
+      widget.status == 'PENDING' || widget.status == 'IN_PROGRESS';
+
+  static String _sig(List<TaskItem> items) =>
+      items.map((i) => '${i.id}:${i.done}').join(',');
+
+  @override
+  void didUpdateWidget(covariant _ChecklistSection old) {
+    super.didUpdateWidget(old);
+    // Re-sync from the parent only when the server data actually changed (e.g.
+    // a detail refetch) — preserves local optimistic state between rebuilds.
+    if (_sig(widget.items) != _sig(old.items)) {
+      _items = List.of(widget.items);
+      _busyItemId = null;
+    }
+  }
+
+  Future<void> _toggle(TaskItem item) async {
+    if (!_editable || item.id == null || _busyItemId != null) return;
+    final id = item.id!;
+    final idx = _items.indexWhere((i) => i.id == id);
+    if (idx < 0) return;
+    final newDone = !_items[idx].done;
+
+    setState(() {
+      _items[idx] = _items[idx].copyWith(done: newDone);
+      _busyItemId = id;
+    });
+
+    final result = await ref
+        .read(taskDataSourceProvider)
+        .updateTaskItem(widget.taskId, id, newDone);
+    if (!mounted) return;
+
+    switch (result) {
+      case Success(:final data):
+        setState(() {
+          _items = List.of(data.items);
+          _busyItemId = null;
+        });
+      case Failure(:final exception):
+        setState(() {
+          final i = _items.indexWhere((e) => e.id == id);
+          if (i >= 0) _items[i] = _items[i].copyWith(done: !newDone);
+          _busyItemId = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(exception is AppException
+                ? exception.message
+                : 'Could not update item. Try again.'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = _items.length;
+    final done = _items.where((i) => i.done).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(label: 'Checklist', icon: Icons.checklist_rounded),
+        _Card(
+          child: Column(
+            children: [
+              // Progress bar + count.
+              Row(
+                children: [
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: total == 0 ? 0 : done / total,
+                        minHeight: 6,
+                        backgroundColor: const Color(0xFFE5E7EB),
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          Color(0xFF1B5E4F),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    '$done/$total',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1B5E4F),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              ..._items.asMap().entries.map((entry) {
+                final item = entry.value;
+                final isLast = entry.key == _items.length - 1;
+                final busy = _busyItemId == item.id;
+                final tappable =
+                    _editable && item.id != null && _busyItemId == null;
+                return Column(
+                  children: [
+                    InkWell(
+                      onTap: tappable ? () => _toggle(item) : null,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            _CheckBox(done: item.done, busy: busy),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                item.text,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: item.done
+                                      ? const Color(0xFF9CA3AF)
+                                      : const Color(0xFF374151),
+                                  decoration: item.done
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (!isLast) ...[
+                      const SizedBox(height: 8),
+                      const Divider(height: 1, color: Color(0xFFF3F4F6)),
+                      const SizedBox(height: 8),
+                    ],
+                  ],
+                );
+              }),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CheckBox extends StatelessWidget {
+  final bool done;
+  final bool busy;
+  const _CheckBox({required this.done, required this.busy});
+
+  @override
+  Widget build(BuildContext context) {
+    if (busy) {
+      return const SizedBox(
+        width: 22,
+        height: 22,
+        child: Padding(
+          padding: EdgeInsets.all(3),
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: Color(0xFF1B5E4F),
+          ),
+        ),
+      );
+    }
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFF1B5E4F), width: 1.5),
+        borderRadius: BorderRadius.circular(6),
+        color: done ? const Color(0xFF1B5E4F) : Colors.transparent,
+      ),
+      child:
+          done ? const Icon(Icons.check, size: 14, color: Colors.white) : null,
+    );
+  }
+}
 
 class _Card extends StatelessWidget {
   final Widget child;
