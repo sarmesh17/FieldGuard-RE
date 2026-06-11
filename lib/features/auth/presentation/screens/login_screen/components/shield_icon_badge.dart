@@ -7,19 +7,33 @@ class ShieldIconBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = AppResponsive.r(context, 72);
+    final size = AppResponsive.r(context, 84);
     return Center(
       child: Container(
         width: size,
         height: size,
-        decoration: const BoxDecoration(
-          color: AppColors.lightGreenCircle,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.16),
           shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.35),
+            width: 1.5,
+          ),
         ),
-        child: Icon(
-          Icons.shield_outlined,
-          size: AppResponsive.r(context, 36),
-          color: AppColors.primaryGreen,
+        child: Center(
+          child: Container(
+            width: AppResponsive.r(context, 60),
+            height: AppResponsive.r(context, 60),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.shield_outlined,
+              size: AppResponsive.r(context, 32),
+              color: AppColors.primaryGreen,
+            ),
+          ),
         ),
       ),
     );

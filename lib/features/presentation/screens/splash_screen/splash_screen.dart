@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
+import 'package:field_guard_re/core/services/live_tracking_service.dart';
+import 'package:field_guard_re/core/services/push_notification_service.dart';
 import 'package:field_guard_re/core/theme/app_responsive.dart';
 import 'package:field_guard_re/features/auth/presentation/providers/auth_provider.dart';
 
@@ -59,6 +63,18 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
     // Authenticated → home, first-time / logged-out → onboarding
     context.go(restored ? AppRoutes.home : AppRoutes.onboarding);
+
+    if (restored) {
+      // Re-register the FCM token on every authenticated launch — it may have
+      // rotated, or registration may have failed (offline) last session.
+      unawaited(PushNotificationService.instance.registerToken());
+      // Open the realtime socket for live in-app notifications (independent of
+      // live tracking).
+      unawaited(LiveTrackingService.instance.connect());
+      // If the app was cold-started by tapping a push, jump to that screen now
+      // that we're on home.
+      PushNotificationService.instance.consumePendingDeepLink();
+    }
   }
 
   @override

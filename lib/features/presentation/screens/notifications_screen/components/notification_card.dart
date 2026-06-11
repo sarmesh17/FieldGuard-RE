@@ -11,6 +11,10 @@ class NotificationCard extends StatelessWidget {
   final String description;
   final String time;
 
+  /// Unread items get a subtle tint + a dot; tapping opens the linked screen.
+  final bool isUnread;
+  final VoidCallback? onTap;
+
   const NotificationCard({
     super.key,
     required this.icon,
@@ -20,27 +24,34 @@ class NotificationCard extends StatelessWidget {
     required this.title,
     required this.description,
     required this.time,
+    this.isUnread = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.cardWhite,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: isUnread ? const Color(0xFFF0FDF4) : AppColors.cardWhite,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+            border: Border(
+              left: BorderSide(color: borderColor, width: 4),
+            ),
           ),
-        ],
-        border: Border(
-          left: BorderSide(color: borderColor, width: 4),
-        ),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Row(
+          padding: const EdgeInsets.all(16),
+          child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
@@ -90,8 +101,22 @@ class NotificationCard extends StatelessWidget {
               ],
             ),
           ),
+          if (isUnread) ...[
+            const SizedBox(width: 8),
+            Container(
+              margin: const EdgeInsets.only(top: 6),
+              width: 9,
+              height: 9,
+              decoration: const BoxDecoration(
+                color: AppColors.primaryGreen,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ],
         ],
       ),
-    );
+    ),
+  ),
+);
   }
 }

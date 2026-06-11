@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:field_guard_re/core/router/app_router.dart';
 import 'package:field_guard_re/core/router/app_routes.dart';
 import 'package:field_guard_re/core/services/geofence_visit_service.dart';
+import 'package:field_guard_re/core/services/live_tracking_service.dart';
 import 'package:field_guard_re/core/services/token_refresh_service.dart';
 import 'package:field_guard_re/core/services/token_storage.dart';
 import 'package:flutter/foundation.dart';
@@ -67,6 +68,8 @@ class ErrorInterceptor extends Interceptor {
     // Halt geofence detection/uploads for the dead session (persisted visit +
     // queue survive on disk and resume after re-login).
     GeofenceVisitService.instance.stop();
+    // Close the realtime notification/tracking socket for the dead session.
+    await LiveTrackingService.instance.disconnect();
     await TokenStorage.clearTokens();
     AppRouter.navigatorKey.currentContext?.go(AppRoutes.login);
   }

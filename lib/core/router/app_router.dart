@@ -5,12 +5,9 @@ import '../../features/presentation/screens/onboarding_screen/onboarding_screen.
 import '../../features/auth/presentation/screens/login_screen/login_screen.dart';
 import '../../features/presentation/screens/home_screen/home_screen.dart';
 import '../../features/presentation/screens/route_screen/route_screen.dart';
-import '../../features/presentation/screens/shop_details_screen/shop_details_screen.dart';
-import '../../features/presentation/screens/active_visit_screen/active_visit_screen.dart';
-import '../../features/presentation/screens/new_order_screen/new_order_screen.dart';
 import '../../features/presentation/screens/collect_payment_screen/collect_payment_screen.dart';
+import '../../features/collections/data/models/collection_response.dart';
 import '../../features/presentation/screens/sms_sent_screen/sms_sent_screen.dart';
-import '../../features/presentation/screens/daily_summary_screen/daily_summary_screen.dart';
 import '../../features/tasks/presentation/screens/task_detail_screen.dart';
 import '../../features/tasks/presentation/screens/task_history_screen.dart';
 import '../../features/tasks/presentation/screens/tasks_screen.dart';
@@ -21,6 +18,8 @@ import '../../features/presentation/screens/route_screen/map_fullscreen_screen.d
 import '../../features/shops/presentation/screens/shops_list_screen.dart';
 import '../../features/shops/presentation/screens/shop_create_map_screen.dart';
 import '../../features/shops/presentation/screens/shop_detail_screen.dart';
+import '../../features/legal/presentation/screens/terms_screen.dart';
+import '../../features/legal/presentation/screens/privacy_screen.dart';
 import '../widgets/main_shell.dart';
 import 'app_routes.dart';
 
@@ -78,24 +77,6 @@ class AppRouter {
         ],
       ),
 
-      // Shop Details Screen
-      GoRoute(
-        path: AppRoutes.shopDetails,
-        builder: (context, state) => const ShopDetailsScreen(),
-      ),
-
-      // Active Visit Screen
-      GoRoute(
-        path: AppRoutes.activeVisit,
-        builder: (context, state) => const ActiveVisitScreen(),
-      ),
-
-      // New Order Screen
-      GoRoute(
-        path: AppRoutes.newOrder,
-        builder: (context, state) => const NewOrderScreen(),
-      ),
-
       // Collect Payment Screen. Requires `extra` with shopId/shopName, plus
       // an optional taskId so we can invalidate the task on a successful
       // collection. Falls back to a friendly error screen if anything was
@@ -122,25 +103,26 @@ class AppRouter {
         },
       ),
 
-      // SMS Sent Screen
+      // SMS Sent Screen. Takes the full CollectionResponse via `extra` so
+      // it can render the backend-authored SMS body verbatim. Falls back
+      // to a friendly error screen if anything other than that shape is
+      // pushed (shouldn't happen from in-app flow, but safer than crashing
+      // on a stale deep link).
       GoRoute(
         path: AppRoutes.smsSent,
         builder: (context, state) {
-          final extra = state.extra as Map<String, String>?;
-          return SmsSentScreen(
-            shopName: extra?['shopName'] ?? 'Shop',
-            phoneNumber: extra?['phoneNumber'] ?? '+000 0000 0000',
-            amount: extra?['amount'] ?? '0',
-            repName: extra?['repName'] ?? 'Rep',
-            time: extra?['time'] ?? '00:00',
+          final extra = state.extra;
+          if (extra is Map && extra['response'] is CollectionResponse) {
+            return SmsSentScreen(
+              response: extra['response'] as CollectionResponse,
+            );
+          }
+          return const Scaffold(
+            body: Center(
+              child: Text('Missing collection context'),
+            ),
           );
         },
-      ),
-
-      // Daily Summary Screen
-      GoRoute(
-        path: AppRoutes.dailySummary,
-        builder: (context, state) => const DailySummaryScreen(),
       ),
 
       // Notifications Screen
@@ -205,6 +187,16 @@ class AppRouter {
           final title = state.uri.queryParameters['title'] ?? 'Task';
           return TaskHistoryScreen(taskId: id, taskTitle: title);
         },
+      ),
+
+      // Legal screens — public, no auth required
+      GoRoute(
+        path: AppRoutes.termsAndConditions,
+        builder: (context, state) => const TermsAndConditionsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.privacyPolicy,
+        builder: (context, state) => const PrivacyPolicyScreen(),
       ),
 
     ],

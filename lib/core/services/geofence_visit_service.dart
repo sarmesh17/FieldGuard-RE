@@ -472,13 +472,37 @@ class GeofenceVisitService {
   /// process-death the real exit was never observed — close it at the last
   /// persisted in-geofence fix, flagged `exitEstimated: true`. Then flush any
   /// visits queued before the previous run ended.
-  Future<void> recover() async {
+  ///
+  /// [backgroundServiceAlive] MUST be passed `true` when the foreground
+  /// location service survived the UI being swipe-killed (it's sticky:
+  /// `stopWithTask=false`). In that case the persisted open-visit is NOT a
+  /// crash leftover — the background isolate is still actively tracking it and
+  /// the agent is still inside the fence. Closing it here would wrongly end
+  /// the visit and auto-complete the task while the agent is still at the
+  /// shop. So we leave it for the background isolate to close on a *real*
+  /// exit. We still recover an open-visit whose anchor has gone stale past
+  /// [_staleAnchorTimeout] — that means detection silently died even though
+  /// the service process lingered.
+  Future<void> recover({bool backgroundServiceAlive = false}) async {
     await _mutex.run(() async {
       _stopped = false; // new app session
       final raw = await _storage.read(key: _kOpenVisitKey);
       if (raw == null || raw.isEmpty) return;
       try {
         final ov = OpenVisit.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+
+        if (backgroundServiceAlive) {
+          final age = DateTime.now().toUtc().difference(ov.lastInsideAt);
+          if (age <= _staleAnchorTimeout) {
+            _log('recover: open visit is LIVE (bg service running, anchor '
+                'age=${age.inSeconds}s) — leaving for the isolate to close on '
+                'a real exit; NOT auto-closing');
+            return; // leave the disk record alone — it's not stale
+          }
+          _log('recover: bg service running but anchor stale '
+              '(age=${age.inSeconds}s) — detection died, closing estimated');
+        }
+
         await _storage.delete(key: _kOpenVisitKey);
         await _closeAndEnqueueLocked(
           ov,

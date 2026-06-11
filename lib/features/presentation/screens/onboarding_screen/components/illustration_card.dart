@@ -7,8 +7,8 @@ class IllustrationCard extends StatelessWidget {
   final int pageIndex;
 
   static const List<String> _images = [
-    'assets/images/stay_ahead_in_the_field.png',
-    'assets/images/know_every_visit_img.png',
+    'assets/images/stay_ahead_in_the_field.webp',
+    'assets/images/know_every_visit_img.webp',
   ];
 
   @override

@@ -3,6 +3,7 @@ import 'package:field_guard_re/core/constants/app_constants.dart';
 import 'package:field_guard_re/core/constants/app_strings.dart';
 import 'package:field_guard_re/core/theme/app_colors.dart';
 import 'package:field_guard_re/core/theme/app_text_styles.dart';
+import 'auth_input_decoration.dart';
 
 class PasswordField extends StatelessWidget {
   const PasswordField({
@@ -22,9 +23,13 @@ class PasswordField extends StatelessWidget {
       controller: controller,
       obscureText: obscureText,
       style: AppTextStyles.inputText,
-      decoration: InputDecoration(
+      decoration: authInputDecoration(
         hintText: AppStrings.enterPassword,
-        hintStyle: AppTextStyles.inputHint,
+        prefixIcon: const Icon(
+          Icons.lock_outline,
+          color: AppColors.textGray,
+          size: 20,
+        ),
         suffixIcon: IconButton(
           onPressed: onToggle,
           icon: Icon(

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../../core/router/app_routes.dart';
+import '../../../../../core/theme/app_responsive.dart';
 import '../../../../tasks/data/models/task_model.dart';
 import '../../../../tasks/presentation/providers/tasks_provider.dart';
 
@@ -21,12 +22,10 @@ class ScheduleList extends ConsumerWidget {
     return switch (state) {
       TasksInitial() || TasksLoading() => const _LoadingRow(),
       TasksError(:final message) => _ErrorRow(
-          message: message,
-          onRetry: () =>
-              ref.read(tasksNotifierProvider.notifier).fetch(),
-        ),
-      TasksSuccess() =>
-        _ScheduleContent(tasks: ref.watch(todayTasksProvider)),
+        message: message,
+        onRetry: () => ref.read(tasksNotifierProvider.notifier).fetch(),
+      ),
+      TasksSuccess() => _ScheduleContent(tasks: ref.watch(todayTasksProvider)),
     };
   }
 }
@@ -67,8 +66,11 @@ class _ScheduleItem extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         onTap: () => context.push(AppRoutes.taskDetailPath(task.id)),
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          padding: const EdgeInsets.all(16),
+          margin: EdgeInsets.symmetric(
+            horizontal: AppResponsive.horizontalPad(context),
+            vertical: AppResponsive.r(context, 6),
+          ),
+          padding: EdgeInsets.all(AppResponsive.r(context, 16)),
           decoration: BoxDecoration(
             color: theme.background,
             borderRadius: BorderRadius.circular(16),
@@ -79,18 +81,24 @@ class _ScheduleItem extends StatelessWidget {
           child: Row(
             children: [
               CircleAvatar(
+                radius: AppResponsive.r(context, 20),
                 backgroundColor: theme.avatarBackground,
                 child: theme.avatarIcon != null
-                    ? Icon(theme.avatarIcon, color: theme.avatarFg, size: 18)
+                    ? Icon(
+                        theme.avatarIcon,
+                        color: theme.avatarFg,
+                        size: AppResponsive.r(context, 18),
+                      )
                     : Text(
                         '$index',
                         style: TextStyle(
                           color: theme.avatarFg,
                           fontWeight: FontWeight.bold,
+                          fontSize: AppResponsive.sp(context, 14),
                         ),
                       ),
               ),
-              const SizedBox(width: 16),
+              SizedBox(width: AppResponsive.r(context, 14)),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,9 +108,10 @@ class _ScheduleItem extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 16,
-                        fontWeight:
-                            theme.titleStrike ? FontWeight.w500 : FontWeight.bold,
+                        fontSize: AppResponsive.sp(context, 16),
+                        fontWeight: theme.titleStrike
+                            ? FontWeight.w500
+                            : FontWeight.bold,
                         color: theme.titleColor,
                         decoration: theme.titleStrike
                             ? TextDecoration.lineThrough
@@ -114,16 +123,20 @@ class _ScheduleItem extends StatelessWidget {
                       children: [
                         Icon(
                           theme.subtitleIcon,
-                          size: 14,
+                          size: AppResponsive.r(context, 14),
                           color: theme.subtitleColor,
                         ),
                         const SizedBox(width: 4),
-                        Text(
-                          theme.subtitle(timeText),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.subtitleColor,
-                            fontWeight: FontWeight.w600,
+                        Expanded(
+                          child: Text(
+                            theme.subtitle(timeText),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: AppResponsive.sp(context, 12),
+                              color: theme.subtitleColor,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
@@ -131,7 +144,11 @@ class _ScheduleItem extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, color: theme.chevronColor),
+              Icon(
+                Icons.chevron_right,
+                color: theme.chevronColor,
+                size: AppResponsive.r(context, 24),
+              ),
             ],
           ),
         ),
@@ -239,18 +256,21 @@ class _LoadingRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: EdgeInsets.symmetric(
+        horizontal: AppResponsive.horizontalPad(context),
+        vertical: AppResponsive.r(context, 12),
+      ),
       child: Container(
-        height: 64,
+        height: AppResponsive.r(context, 64),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
         ),
-        child: const Center(
+        child: Center(
           child: SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(
+            width: AppResponsive.r(context, 22),
+            height: AppResponsive.r(context, 22),
+            child: const CircularProgressIndicator(
               strokeWidth: 2.4,
               color: Color(0xFF157347),
             ),
@@ -267,24 +287,30 @@ class _EmptyRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: AppResponsive.horizontalPad(context),
+        vertical: AppResponsive.r(context, 8),
+      ),
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(AppResponsive.r(context, 16)),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: const Color(0xFFE5E7EB)),
         ),
-        child: const Row(
+        child: Row(
           children: [
-            Icon(Icons.event_available_outlined, color: Color(0xFF6B7280)),
-            SizedBox(width: 12),
+            const Icon(
+              Icons.event_available_outlined,
+              color: Color(0xFF6B7280),
+            ),
+            SizedBox(width: AppResponsive.r(context, 12)),
             Expanded(
               child: Text(
                 'No tasks scheduled for today',
                 style: TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFF6B7280),
+                  fontSize: AppResponsive.sp(context, 14),
+                  color: const Color(0xFF6B7280),
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -305,9 +331,12 @@ class _ErrorRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: AppResponsive.horizontalPad(context),
+        vertical: AppResponsive.r(context, 8),
+      ),
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: EdgeInsets.all(AppResponsive.r(context, 14)),
         decoration: BoxDecoration(
           color: const Color(0xFFFEF2F2),
           borderRadius: BorderRadius.circular(16),
@@ -316,25 +345,26 @@ class _ErrorRow extends StatelessWidget {
         child: Row(
           children: [
             const Icon(Icons.error_outline, color: Color(0xFFB91C1C)),
-            const SizedBox(width: 10),
+            SizedBox(width: AppResponsive.r(context, 10)),
             Expanded(
               child: Text(
                 message,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF7F1D1D),
+                style: TextStyle(
+                  fontSize: AppResponsive.sp(context, 12),
+                  color: const Color(0xFF7F1D1D),
                 ),
               ),
             ),
             TextButton(
               onPressed: onRetry,
-              child: const Text(
+              child: Text(
                 'Retry',
                 style: TextStyle(
-                  color: Color(0xFFB91C1C),
+                  color: const Color(0xFFB91C1C),
                   fontWeight: FontWeight.bold,
+                  fontSize: AppResponsive.sp(context, 14),
                 ),
               ),
             ),

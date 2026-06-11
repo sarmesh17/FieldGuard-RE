@@ -50,6 +50,18 @@ class TaskDataSourceImpl with ApiRunner implements TaskDataSource {
       });
 
   @override
+  Future<Result<TaskModel>> updateTaskItem(int taskId, int itemId, bool done) =>
+      safeCall(() async {
+        final response = await _dio.patch(
+          ApiConstant.taskItemUpdateEndpoint(taskId, itemId),
+          data: {'done': done},
+        );
+        final body = response.data as Map<String, dynamic>;
+        final taskJson = body['task'] as Map<String, dynamic>? ?? body;
+        return TaskModel.fromJson(taskJson);
+      });
+
+  @override
   Future<Result<List<TaskHistoryEntry>>> getTaskHistory(int taskId) =>
       safeCall(() async {
         final response = await _dio.get(

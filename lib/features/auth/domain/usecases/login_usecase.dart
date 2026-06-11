@@ -10,6 +10,13 @@ class LoginUseCase {
   Future<Result<LoginResponse>> call({
     required String phone,
     required String password,
+    required bool termsAccepted,
+    required String termsVersion,
   }) =>
-      _repository.login(phone: phone, password: password);
+      _repository.login(
+        phone: phone,
+        password: password,
+        termsAccepted: termsAccepted,
+        termsVersion: termsVersion,
+      );
 }

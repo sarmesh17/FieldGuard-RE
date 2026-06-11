@@ -6,6 +6,8 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // Firebase (FCM) — must come after the Android/Flutter plugins.
+    id("com.google.gms.google-services")
 }
 
 // Release signing — read android/key.properties if present. The file is
@@ -36,11 +38,15 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // Employee/Agent app. Registered as a separate Android app in the same
+        // Firebase project (fieldguard-703e2) as the manager app
+        // (com.agnibits.field_guard) — the google-services.json carries both.
         applicationId = "com.example.field_guard_re"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // Firebase (firebase_core/messaging) requires API 23+. Never lower the
+        // Flutter default if it's already higher.
+        minSdk = maxOf(flutter.minSdkVersion, 23)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -68,6 +74,16 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+
+            // Shrink Java/Kotlin bytecode (R8) and strip unused Android
+            // resources to reduce release size. Keep rules for plugins reached
+            // via reflection/JNI live in proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
